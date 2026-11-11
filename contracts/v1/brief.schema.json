@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wecraft.example/schemas/v1/brief.schema.json",
+  "title": "WeCraft Brief Package v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "briefId", "workspaceId", "briefNo", "title", "status", "purpose", "split", "version", "content"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "briefId": { "type": "string", "format": "uuid" },
+    "workspaceId": { "type": "string", "format": "uuid" },
+    "briefNo": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "status": { "enum": ["DRAFT", "READY", "ARCHIVED"] },
+    "purpose": { "enum": ["CASE_SOURCE", "GOLDEN_EVAL", "BOTH"] },
+    "split": { "enum": ["DEV", "HOLDOUT"] },
+    "version": { "type": "integer", "minimum": 1 },
+    "content": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manuscriptMarkdown", "targetAudience", "designCommission", "brandRequirements", "prohibitedItems"],
+      "properties": {
+        "manuscriptMarkdown": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "designCommission": { "type": "string" },
+        "brandRequirements": { "type": "string" },
+        "prohibitedItems": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

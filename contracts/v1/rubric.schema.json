@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wecraft.example/schemas/v1/rubric.schema.json",
+  "title": "WeCraft Design Rubric v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "rubricVersion", "scale", "dimensions"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "rubricVersion": { "type": "string", "pattern": "^v[0-9]+(\\.[0-9]+)*$" },
+    "scale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min", "max", "integerOnly"],
+      "properties": {
+        "min": { "const": 1 },
+        "max": { "const": 5 },
+        "integerOnly": { "const": true }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "name", "weight"],
+        "properties": {
+          "code": { "enum": ["CONTENT_FIT", "VISUAL_MECHANISM", "TYPE_HIERARCHY", "IMAGE_NARRATIVE", "RHYTHM", "COMPLETION"] },
+          "name": { "type": "string", "minLength": 1 },
+          "weight": { "const": 0.1666666667 }
+        }
+      }
+    }
+  }
+}

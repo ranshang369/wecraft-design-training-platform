@@ -1,0 +1,74 @@
+openapi: 3.1.0
+info:
+  title: WeCraft Design Training Platform API
+  version: 1.0.0-draft
+  description: Versioned internal API contract. Authentication and authorization are enforced server-side.
+servers:
+  - url: http://localhost:3000/api/v1
+paths:
+  /health:
+    get:
+      summary: Liveness and readiness
+      responses:
+        "200":
+          description: Service healthy
+  /briefs:
+    get:
+      summary: List briefs visible to the current user
+      responses:
+        "200":
+          description: Brief list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "./brief.schema.json"
+    post:
+      summary: Create a draft brief
+      responses:
+        "201":
+          description: Created
+  /cases:
+    get:
+      summary: List eligible cases or authorized drafts
+      responses:
+        "200":
+          description: Case list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "./case.schema.json"
+  /review-tasks:
+    get:
+      summary: List the current user's review inbox
+      responses:
+        "200":
+          description: Review tasks
+  /candidates:
+    post:
+      summary: Submit a candidate version (AI engineer only)
+      responses:
+        "201":
+          description: Candidate queued for hard checks
+        "403":
+          description: Forbidden
+  /datasets/{datasetId}/export:
+    post:
+      summary: Validate rights and create an export snapshot
+      parameters:
+        - name: datasetId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: Export accepted
+        "403":
+          description: Forbidden
+        "422":
+          description: Dataset blocked by authorization or eligibility checks

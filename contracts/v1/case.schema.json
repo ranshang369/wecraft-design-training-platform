@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wecraft.example/schemas/v1/case.schema.json",
+  "title": "WeCraft Case Package v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "caseId", "workspaceId", "caseNo", "title", "status", "archetype", "version", "authorization", "assets"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "caseId": { "type": "string", "format": "uuid" },
+    "workspaceId": { "type": "string", "format": "uuid" },
+    "caseNo": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "status": { "enum": ["DRAFT", "SUBMITTED", "IN_REVIEW", "ARBITRATION", "CHANGES_REQUESTED", "ELIGIBLE", "REJECTED", "QUARANTINED", "ARCHIVED"] },
+    "archetype": { "enum": ["SELF_REFERENTIAL", "MATERIAL", "SCENE", "GENRE", "SCHEMA", "INTERFACE", "CITATION", "PSYCHOLOGICAL", "PROCESS"] },
+    "version": { "type": "integer", "minimum": 1 },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canDeriveMechanism", "canUseForGeneration", "canUseForDisplay", "canUseForTraining", "canUseForEvaluation", "canShowPublicly"],
+      "properties": {
+        "canDeriveMechanism": { "type": "boolean" },
+        "canUseForGeneration": { "type": "boolean" },
+        "canUseForDisplay": { "type": "boolean" },
+        "canUseForTraining": { "type": "boolean" },
+        "canUseForEvaluation": { "type": "boolean" },
+        "canShowPublicly": { "type": "boolean" }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "enum": ["SCREENSHOT_375", "SCREENSHOT_DESKTOP", "HTML", "SOURCE", "THUMBNAIL", "OTHER"] },
+          "path": { "type": "string", "minLength": 1 },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

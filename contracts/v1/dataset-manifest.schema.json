@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wecraft.example/schemas/v1/dataset-manifest.schema.json",
+  "title": "WeCraft Dataset Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["dataset_id", "version", "schema_version", "created_at", "created_by", "rights_snapshot", "item_count", "content_hash", "files"],
+  "properties": {
+    "dataset_id": { "type": "string", "format": "uuid" },
+    "version": { "type": "integer", "minimum": 1 },
+    "schema_version": { "const": "1.0" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "created_by": { "type": "string" },
+    "rights_snapshot": { "type": "object" },
+    "item_count": { "type": "integer", "minimum": 0 },
+    "content_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size_bytes"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size_bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

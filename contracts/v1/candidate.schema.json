@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wecraft.example/schemas/v1/candidate.schema.json",
+  "title": "WeCraft Candidate Package v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "candidateId", "workspaceId", "candidateNo", "briefId", "experimentId", "status", "version", "model", "assets"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "candidateId": { "type": "string", "format": "uuid" },
+    "workspaceId": { "type": "string", "format": "uuid" },
+    "candidateNo": { "type": "string", "minLength": 1 },
+    "briefId": { "type": "string", "format": "uuid" },
+    "experimentId": { "type": "string", "format": "uuid" },
+    "status": { "enum": ["DRAFT", "SUBMITTED", "HARD_CHECKING", "HARD_CHECK_FAILED", "READY_FOR_BLIND", "IN_BLIND", "COMPLETED", "WITHDRAWN", "DISQUALIFIED", "QUARANTINED"] },
+    "version": { "type": "integer", "minimum": 1 },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "name", "version"],
+      "properties": {
+        "provider": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "enum": ["SCREENSHOT_375", "SCREENSHOT_DESKTOP", "HTML"] },
+          "path": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

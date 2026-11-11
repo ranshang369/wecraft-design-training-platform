@@ -1,0 +1,40 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+dist/
+build/
+out/
+.turbo/
+*.tsbuildinfo
+
+# env and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# runtime data
+uploads/
+storage/
+runtime/
+*.sqlite
+*.sqlite3
+prisma/dev.db
+
+# tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# logs and local files
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

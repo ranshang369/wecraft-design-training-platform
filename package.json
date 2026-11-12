@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "bootstrap:admin": "tsx scripts/bootstrap.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check": "npm run typecheck && npm test"

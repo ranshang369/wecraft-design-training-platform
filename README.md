@@ -37,6 +37,8 @@ docker compose -f deploy/docker-compose.yml run --rm -e NODE_ENV=development app
 
 打开 http://localhost:3000。首次启动会自动执行 `prisma migrate deploy`。种子命令显式覆盖为 `NODE_ENV=development`；`db seed` 会清空并重建演示 Workspace，禁止用于生产。
 
+生产环境不要运行演示种子。执行 `npm run bootstrap:admin`，通过一次性环境变量创建首个 OWNER，详见[部署与运维](docs/operations/deployment.md)。
+
 ## 快速启动：本地开发
 
 前置要求：Node.js 22、npm、PostgreSQL 15+，以及 Chrome/Chromium 或 Playwright Chromium（硬检查需要）。

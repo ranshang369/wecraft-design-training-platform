@@ -61,6 +61,21 @@ npm run start
 - `db:migrate` 仅用于开发环境创建迁移。
 - `db:seed` 包含业务表清空，严禁指向生产库；脚本本身也会拒绝 `NODE_ENV=production` 和非 `wecraft_dt` 数据库。
 
+## 首次生产初始化
+
+生产环境不使用演示种子。执行迁移后，用一次性环境变量创建 Workspace 和首个 OWNER：
+
+```bash
+BOOTSTRAP_ADMIN_EMAIL='owner@your-domain.example' \
+BOOTSTRAP_ADMIN_PASSWORD='<至少 12 位的随机密码>' \
+BOOTSTRAP_ADMIN_NAME='项目负责人' \
+BOOTSTRAP_WORKSPACE_NAME='WeCraft 设计训练工作组' \
+BOOTSTRAP_WORKSPACE_SLUG='wecraft-design' \
+npm run bootstrap:admin
+```
+
+脚本幂等，可重复执行；已存在的邮箱不会被重置密码，只会确保账号处于 ACTIVE、加入目标 Workspace 并获得 OWNER 角色。首次初始化会写 `BOOTSTRAP_ADMIN` 审计事件。执行后立即从部署平台删除一次性密码变量。
+
 ## 反向代理与 TLS
 
 - 在 Nginx/Ingress/ALB 终止 TLS，转发到 `app:3000`。

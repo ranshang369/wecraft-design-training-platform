@@ -2,27 +2,18 @@
 
 ## 目标
 
-- 私有仓库：`wecraft-design-training-platform`
+- 公开仓库：<https://github.com/ranshang369/wecraft-design-training-platform>
 - 默认分支：`main`
-- 外部伙伴只获得本仓库权限，不获得 WeCraft 生产仓库权限。
-- 伙伴可写平台代码；WeCraft 负责人审批数据模型、授权字段、契约和部署秘密。
+- 外部伙伴通过 Pull Request 协作，不获得 WeCraft 生产仓库权限。
+- 伙伴可提交平台代码；仓库所有者审批数据模型、授权字段、契约和部署秘密。
+- 公开可见不等于可以公开真实数据。演示数据必须为虚构内容，生产凭据永不进入 Git。
 
-## 远端创建（组织管理员执行）
+## 远端初始化
 
-当前机器没有 `gh` 或远端地址，以下命令需在具备 GitHub 组织权限的环境执行：
-
-```bash
-gh repo create <org>/wecraft-design-training-platform \
-  --private \
-  --source . \
-  --remote origin \
-  --push
-```
-
-若使用 GitLab 或自建 Git：
+首次推送：
 
 ```bash
-git remote add origin <private-repository-url>
+git remote add origin https://github.com/ranshang369/wecraft-design-training-platform.git
 git push -u origin main
 ```
 
@@ -33,12 +24,12 @@ git push -u origin main
 - 禁止直接向 `main` 推送；所有变更走 Pull Request。
 - 至少 1 名平台维护者批准；涉及 `docs/v1.0/data-model.md`、`docs/v1.0/rbac.md`、`contracts/`、`db/` 时需 WeCraft 负责人批准。
 - 保护 `main` 的强制推送和删除。
-- 合并前要求 CI 通过。
+- 合并前要求 `CI / verify` 通过。
 - 外部伙伴不具备管理员、密钥读取、生产环境访问权限。
 
 ## CODEOWNERS
 
-`.github/CODEOWNERS` 当前使用 `@YOUR_ORG` 占位符。启用分支保护前必须替换为真实组织团队：
+`.github/CODEOWNERS` 当前指向仓库所有者 `@ranshang369`。迁移到组织后应替换为真实 GitHub Team：
 
 - `design-platform-maintainers`：平台代码、文档和测试。
 - `wecraft-owners`：数据模型、授权字段、契约、数据库迁移。
@@ -54,4 +45,4 @@ git push -u origin main
 
 - 从干净克隆执行 README 中的安装、迁移、种子和启动步骤。
 - 演示账号和演示数据可独立运行。
-- CI 在缺少外部凭据时仍可执行单元、集成和契约测试。
+- GitHub Actions 在缺少外部凭据时仍可执行 typecheck、单测、构建和 E2E。

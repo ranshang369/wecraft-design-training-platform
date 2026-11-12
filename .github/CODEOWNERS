@@ -1,10 +1,9 @@
-# Replace placeholder teams with the real organization teams before enabling branch protection.
-# WeCraft owners must approve data model, authorization, and cross-system contract changes.
+# The repository owner reviews public collaboration changes until GitHub Teams are configured.
 
-*                               @YOUR_ORG/design-platform-maintainers
+*                               @ranshang369
 
-/docs/                          @YOUR_ORG/design-platform-maintainers @YOUR_ORG/wecraft-owners
-/docs/v1.0/data-model.md        @YOUR_ORG/wecraft-owners
-/docs/v1.0/rbac.md              @YOUR_ORG/wecraft-owners
-/contracts/                     @YOUR_ORG/wecraft-owners
-/db/                            @YOUR_ORG/wecraft-owners
+/docs/                          @ranshang369
+/docs/v1.0/data-model.md        @ranshang369
+/docs/v1.0/rbac.md              @ranshang369
+/contracts/                     @ranshang369
+/db/                            @ranshang369

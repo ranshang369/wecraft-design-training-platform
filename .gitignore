@@ -22,6 +22,8 @@ out/
 uploads/
 storage/
 runtime/
+.runtime/
+.npm-cache/
 *.sqlite
 *.sqlite3
 prisma/dev.db

@@ -1,0 +1,1016 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleCode {
+  OWNER
+  ADMIN
+  DESIGN_LEAD
+  CONTENT_LEAD
+  EDITOR
+  ANNOTATOR
+  AI_ENGINEER
+  VIEWER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum BriefStatus {
+  DRAFT
+  READY
+  ARCHIVED
+}
+
+enum BriefPurpose {
+  CASE_SOURCE
+  GOLDEN_EVAL
+  BOTH
+}
+
+enum Split {
+  DEV
+  HOLDOUT
+}
+
+enum Archetype {
+  SELF_REFERENTIAL
+  MATERIAL
+  SCENE
+  GENRE
+  SCHEMA
+  INTERFACE
+  CITATION
+  PSYCHOLOGICAL
+  PROCESS
+}
+
+enum CaseStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  ARBITRATION
+  CHANGES_REQUESTED
+  ELIGIBLE
+  REJECTED
+  QUARANTINED
+  ARCHIVED
+}
+
+enum CounterexampleStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  ARBITRATION
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+  QUARANTINED
+  ARCHIVED
+}
+
+enum AssetKind {
+  SCREENSHOT_375
+  SCREENSHOT_DESKTOP
+  HTML
+  SOURCE
+  THUMBNAIL
+  OTHER
+}
+
+enum AuthSubjectType {
+  CASE
+  COUNTEREXAMPLE
+  CANDIDATE
+}
+
+enum EvidenceStatus {
+  MISSING
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+  REVOKED
+}
+
+enum ReviewTaskType {
+  CASE_REVIEW
+  COUNTEREXAMPLE_REVIEW
+  ARBITRATION
+  BLIND_PAIRWISE
+}
+
+enum ReviewTaskStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+enum ReviewRole {
+  REVIEWER
+  ADJUDICATOR
+}
+
+enum ReviewRecommendation {
+  PUBLISHABLE
+  NOT_PUBLISHABLE
+  CHANGES_REQUESTED
+}
+
+enum ReviewVersionStatus {
+  SUBMITTED
+  SUPERSEDED
+}
+
+enum ReviewEvidenceType {
+  SCREENSHOT_REGION
+  HTML_FRAGMENT
+  MANUSCRIPT_EXCERPT
+}
+
+enum CandidateStatus {
+  DRAFT
+  SUBMITTED
+  HARD_CHECKING
+  HARD_CHECK_FAILED
+  READY_FOR_BLIND
+  IN_BLIND
+  COMPLETED
+  WITHDRAWN
+  DISQUALIFIED
+  QUARANTINED
+}
+
+enum HardCheckRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  ERROR
+}
+
+enum HardCheckSeverity {
+  BLOCK
+  WARN
+  INFO
+}
+
+enum HardCheckStatus {
+  PASS
+  FAIL
+  ERROR
+  SKIPPED
+}
+
+enum ExperimentStatus {
+  DRAFT
+  FROZEN
+  RUNNING
+  CLOSED
+  ARCHIVED
+}
+
+enum ExperimentPairStatus {
+  PENDING
+  READY
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum Preference {
+  LEFT
+  RIGHT
+  TIE
+}
+
+enum DatasetType {
+  TRAIN
+  EVAL
+}
+
+enum DatasetStatus {
+  DRAFT
+  VALIDATING
+  BLOCKED
+  READY_FOR_APPROVAL
+  APPROVED
+  EXPORTING
+  READY
+  FAILED
+  REVOKED
+  ARCHIVED
+}
+
+enum DatasetFormat {
+  WECRAFT_V1
+  CSV_SUMMARY
+}
+
+enum DatasetItemType {
+  BRIEF
+  CASE
+  COUNTEREXAMPLE
+  CANDIDATE
+  PREFERENCE
+}
+
+enum DatasetItemStatus {
+  READY
+  QUARANTINED
+  EXCLUDED
+}
+
+enum DatasetExportStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  REVOKED
+}
+
+enum NotificationChannel {
+  IN_APP
+  FEISHU
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum LegalHoldScope {
+  WORKSPACE
+  CASE
+  COUNTEREXAMPLE
+  CANDIDATE
+  DATASET
+  FILE
+}
+
+enum LegalHoldStatus {
+  ACTIVE
+  RELEASED
+}
+
+model Workspace {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  slug         String   @unique
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  memberships  Membership[]
+  invitations  Invitation[]
+  briefs       Brief[]
+  cases        Case[]
+  counterexamples Counterexample[]
+  candidates   Candidate[]
+  experiments  Experiment[]
+  datasets     Dataset[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+  storedFiles  StoredFile[]
+  authGrants   AuthorizationGrant[]
+  legalHolds   LegalHold[]
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String
+  passwordHash String
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  memberships  Membership[]
+  sessions     Session[]
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        RoleCode @unique
+  name        String
+  description String?
+  members     MemberRole[]
+}
+
+model Membership {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  status      MembershipStatus @default(ACTIVE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles       MemberRole[]
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model MemberRole {
+  id           String @id @default(uuid()) @db.Uuid
+  membershipId String @db.Uuid
+  roleId       String @db.Uuid
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([membershipId, roleId])
+}
+
+model Session {
+  id          String   @id @default(uuid()) @db.Uuid
+  tokenHash   String   @unique
+  userId      String   @db.Uuid
+  workspaceId String?  @db.Uuid
+  expiresAt   DateTime
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model Invitation {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  email       String
+  roleCode    RoleCode
+  tokenHash   String   @unique
+  status      String   @default("PENDING")
+  invitedBy   String   @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, email])
+}
+
+model Brief {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  briefNo        String
+  title          String
+  status         BriefStatus @default(DRAFT)
+  purpose        BriefPurpose @default(CASE_SOURCE)
+  split          Split @default(DEV)
+  currentVersion Int @default(1)
+  ownerId        String   @db.Uuid
+  approvedBy     String?  @db.Uuid
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  versions       BriefVersion[]
+  cases          Case[]
+  counterexamples Counterexample[]
+  experimentBriefs ExperimentBrief[]
+  @@unique([workspaceId, briefNo])
+  @@index([workspaceId, split, status])
+}
+
+model BriefVersion {
+  id                   String   @id @default(uuid()) @db.Uuid
+  briefId              String   @db.Uuid
+  version              Int
+  manuscriptMarkdown   String
+  images               Json     @default("[]")
+  targetAudience       String
+  designCommission     String
+  brandRequirements    String
+  prohibitedItems      String
+  userIntent           String?
+  hardConstraints      Json?
+  acceptableArchetypes Json?
+  mustAvoid            Json?
+  humanReference       Json?
+  rubricTargets        Json?
+  acceptanceNotes      String?
+  contentHash          String
+  createdBy            String   @db.Uuid
+  createdAt            DateTime @default(now())
+  brief                Brief    @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  @@unique([briefId, version])
+}
+
+model Case {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  caseNo         String
+  title          String
+  status         CaseStatus @default(DRAFT)
+  archetype      Archetype
+  briefId        String?  @db.Uuid
+  currentVersion Int      @default(1)
+  createdBy      String   @db.Uuid
+  ownerId        String   @db.Uuid
+  approvedBy     String?  @db.Uuid
+  approvedAt     DateTime?
+  quarantineReason String?
+  rowVersion     Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brief          Brief?    @relation(fields: [briefId], references: [id])
+  versions       CaseVersion[]
+  assets         CaseAsset[]
+  reviews        CaseReview[]
+  @@unique([workspaceId, caseNo])
+  @@index([workspaceId, status, archetype])
+}
+
+model CaseVersion {
+  id                   String @id @default(uuid()) @db.Uuid
+  caseId               String @db.Uuid
+  version              Int
+  applicableConditions String
+  designMechanism      String
+  antiPatterns         Json     @default("[]")
+  mechanismTags        Json     @default("[]")
+  selfScores           Json
+  sourceType           String
+  sourceNote           String
+  contentHash          String
+  createdBy            String   @db.Uuid
+  createdAt            DateTime @default(now())
+  case                 Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  assets               CaseAsset[]
+  reviews              CaseReview[]
+  @@unique([caseId, version])
+}
+
+model CaseAsset {
+  id            String   @id @default(uuid()) @db.Uuid
+  caseId        String   @db.Uuid
+  caseVersionId String   @db.Uuid
+  storedFileId  String   @db.Uuid
+  kind          AssetKind
+  sortOrder     Int      @default(0)
+  isPrimary     Boolean  @default(false)
+  width         Int?
+  height        Int?
+  altText       String?
+  createdAt     DateTime @default(now())
+  case          Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseVersion   CaseVersion @relation(fields: [caseVersionId], references: [id], onDelete: Cascade)
+  storedFile    StoredFile  @relation(fields: [storedFileId], references: [id])
+  @@index([caseVersionId, kind])
+}
+
+model Counterexample {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  counterexampleNo String
+  title          String
+  status         CounterexampleStatus @default(DRAFT)
+  archetype      Archetype
+  briefId        String?  @db.Uuid
+  currentVersion Int      @default(1)
+  createdBy      String   @db.Uuid
+  ownerId        String   @db.Uuid
+  approvedBy     String?  @db.Uuid
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  brief          Brief?    @relation(fields: [briefId], references: [id])
+  versions       CounterexampleVersion[]
+  assets         CounterexampleAsset[]
+  reviews        CounterexampleReview[]
+  @@unique([workspaceId, counterexampleNo])
+}
+
+model CounterexampleVersion {
+  id                   String @id @default(uuid()) @db.Uuid
+  counterexampleId     String @db.Uuid
+  version              Int
+  failureSummary       String
+  failureLabels        Json
+  reproductionSteps    String
+  rootCause            String?
+  repairSuggestion     String
+  applicableConditions Json     @default("[]")
+  sourceType           String
+  sourceNote           String
+  contentHash          String
+  createdBy            String @db.Uuid
+  createdAt            DateTime @default(now())
+  counterexample       Counterexample @relation(fields: [counterexampleId], references: [id], onDelete: Cascade)
+  assets               CounterexampleAsset[]
+  reviews              CounterexampleReview[]
+  @@unique([counterexampleId, version])
+}
+
+model CounterexampleAsset {
+  id                    String @id @default(uuid()) @db.Uuid
+  counterexampleId      String @db.Uuid
+  counterexampleVersionId String @db.Uuid
+  storedFileId          String @db.Uuid
+  kind                  AssetKind
+  sortOrder             Int @default(0)
+  width                 Int?
+  height                Int?
+  altText               String?
+  createdAt             DateTime @default(now())
+  counterexample        Counterexample @relation(fields: [counterexampleId], references: [id], onDelete: Cascade)
+  counterexampleVersion CounterexampleVersion @relation(fields: [counterexampleVersionId], references: [id], onDelete: Cascade)
+  storedFile            StoredFile @relation(fields: [storedFileId], references: [id])
+  @@index([counterexampleVersionId, kind])
+}
+
+model AuthorizationGrant {
+  id                   String @id @default(uuid()) @db.Uuid
+  workspaceId          String @db.Uuid
+  subjectType          AuthSubjectType
+  subjectId            String @db.Uuid
+  canDeriveMechanism   Boolean @default(false)
+  canUseForGeneration  Boolean @default(false)
+  canUseForDisplay     Boolean @default(false)
+  canUseForTraining    Boolean @default(false)
+  canUseForEvaluation  Boolean @default(false)
+  canShowPublicly      Boolean @default(false)
+  evidenceStatus       EvidenceStatus @default(MISSING)
+  evidenceNote         String?
+  expiresAt            DateTime?
+  updatedBy            String @db.Uuid
+  updatedAt            DateTime @updatedAt
+  createdAt            DateTime @default(now())
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  events               AuthorizationEvent[]
+  @@unique([subjectType, subjectId])
+}
+
+model AuthorizationEvent {
+  id        String @id @default(uuid()) @db.Uuid
+  grantId   String @db.Uuid
+  actorId   String @db.Uuid
+  action    String
+  before    Json
+  after     Json
+  reason    String
+  createdAt DateTime @default(now())
+  grant     AuthorizationGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  @@index([grantId, createdAt])
+}
+
+model ReviewTask {
+  id                   String @id @default(uuid()) @db.Uuid
+  workspaceId          String @db.Uuid
+  type                 ReviewTaskType
+  subjectType          String
+  subjectId            String @db.Uuid
+  subjectVersionId     String? @db.Uuid
+  experimentPairId     String? @db.Uuid
+  assigneeId           String @db.Uuid
+  reviewRole           ReviewRole @default(REVIEWER)
+  status               ReviewTaskStatus @default(PENDING)
+  round                Int @default(1)
+  priority             Int @default(0)
+  dueAt                DateTime?
+  assignedBy           String @db.Uuid
+  assignedAt           DateTime @default(now())
+  acceptedAt           DateTime?
+  submittedAt          DateTime?
+  declinedAt           DateTime?
+  declineReason        String?
+  expiresAt            DateTime?
+  blindPolicySnapshot  Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  caseReviews          CaseReview[]
+  counterexampleReviews CounterexampleReview[]
+  pairwiseComparisons  PairwiseComparison[]
+  @@index([workspaceId, assigneeId, status])
+  @@index([type, subjectId])
+}
+
+model CaseReview {
+  id             String @id @default(uuid()) @db.Uuid
+  workspaceId    String @db.Uuid
+  taskId         String @db.Uuid
+  caseId         String @db.Uuid
+  caseVersionId  String @db.Uuid
+  reviewerId     String @db.Uuid
+  version        Int @default(1)
+  status         ReviewVersionStatus @default(SUBMITTED)
+  recommendation ReviewRecommendation
+  snapshot       Json
+  contentHash    String
+  rationale      String?
+  supersedesId   String? @db.Uuid
+  submittedAt    DateTime @default(now())
+  task           ReviewTask @relation(fields: [taskId], references: [id])
+  case           Case @relation(fields: [caseId], references: [id])
+  caseVersion    CaseVersion @relation(fields: [caseVersionId], references: [id])
+  scores         ReviewScore[]
+  evidence       ReviewEvidence[]
+  @@unique([taskId, version])
+  @@index([caseId, reviewerId])
+}
+
+model CounterexampleReview {
+  id                  String @id @default(uuid()) @db.Uuid
+  workspaceId         String @db.Uuid
+  taskId              String @db.Uuid
+  counterexampleId    String @db.Uuid
+  counterexampleVersionId String @db.Uuid
+  reviewerId          String @db.Uuid
+  version             Int @default(1)
+  status              ReviewVersionStatus @default(SUBMITTED)
+  recommendation      ReviewRecommendation
+  snapshot            Json
+  contentHash         String
+  rationale           String?
+  supersedesId        String? @db.Uuid
+  submittedAt         DateTime @default(now())
+  task                ReviewTask @relation(fields: [taskId], references: [id])
+  counterexample      Counterexample @relation(fields: [counterexampleId], references: [id])
+  counterexampleVersion CounterexampleVersion @relation(fields: [counterexampleVersionId], references: [id])
+  scores              ReviewScore[]
+  evidence            ReviewEvidence[]
+  @@unique([taskId, version])
+}
+
+model ReviewScore {
+  id                    String @id @default(uuid()) @db.Uuid
+  caseReviewId          String? @db.Uuid
+  counterexampleReviewId String? @db.Uuid
+  dimensionCode         String
+  score                 Int?
+  isNa                  Boolean @default(false)
+  caseReview            CaseReview? @relation(fields: [caseReviewId], references: [id], onDelete: Cascade)
+  counterexampleReview  CounterexampleReview? @relation(fields: [counterexampleReviewId], references: [id], onDelete: Cascade)
+  @@unique([caseReviewId, dimensionCode])
+  @@unique([counterexampleReviewId, dimensionCode])
+}
+
+model ReviewEvidence {
+  id                    String @id @default(uuid()) @db.Uuid
+  caseReviewId          String? @db.Uuid
+  counterexampleReviewId String? @db.Uuid
+  evidenceType          ReviewEvidenceType
+  locator               String
+  excerpt               String
+  caseReview            CaseReview? @relation(fields: [caseReviewId], references: [id], onDelete: Cascade)
+  counterexampleReview  CounterexampleReview? @relation(fields: [counterexampleReviewId], references: [id], onDelete: Cascade)
+}
+
+model StoredFile {
+  id                String @id @default(uuid()) @db.Uuid
+  workspaceId       String @db.Uuid
+  provider          String @default("local")
+  bucket            String
+  objectKey         String @unique
+  mimeType          String
+  sizeBytes         BigInt
+  sha256            String
+  purpose           String
+  malwareScanStatus String @default("CLEAN")
+  createdBy         String? @db.Uuid
+  createdAt         DateTime @default(now())
+  deletedAt         DateTime?
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  caseAssets        CaseAsset[]
+  counterexampleAssets CounterexampleAsset[]
+  candidateAssets   CandidateAsset[]
+}
+
+model Candidate {
+  id             String @id @default(uuid()) @db.Uuid
+  workspaceId    String @db.Uuid
+  candidateNo    String
+  title          String
+  briefId        String @db.Uuid
+  experimentId   String? @db.Uuid
+  currentVersion Int @default(1)
+  status         CandidateStatus @default(DRAFT)
+  createdBy      String @db.Uuid
+  submittedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  experiment     Experiment? @relation(fields: [experimentId], references: [id])
+  versions       CandidateVersion[]
+  assets         CandidateAsset[]
+  hardCheckRuns  HardCheckRun[]
+  @@unique([workspaceId, candidateNo])
+  @@index([experimentId, status])
+}
+
+model CandidateVersion {
+  id            String @id @default(uuid()) @db.Uuid
+  candidateId   String @db.Uuid
+  version       Int
+  html          String
+  modelProvider String
+  modelName     String
+  modelVersion  String
+  contentHash   String
+  createdBy     String @db.Uuid
+  createdAt     DateTime @default(now())
+  candidate     Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  assets        CandidateAsset[]
+  hardCheckRuns HardCheckRun[]
+  @@unique([candidateId, version])
+}
+
+model CandidateAsset {
+  id               String @id @default(uuid()) @db.Uuid
+  candidateId      String @db.Uuid
+  candidateVersionId String @db.Uuid
+  storedFileId     String @db.Uuid
+  kind             AssetKind
+  sortOrder        Int @default(0)
+  width            Int?
+  height           Int?
+  createdAt        DateTime @default(now())
+  candidate        Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidateVersion CandidateVersion @relation(fields: [candidateVersionId], references: [id], onDelete: Cascade)
+  storedFile       StoredFile @relation(fields: [storedFileId], references: [id])
+  @@index([candidateVersionId, kind])
+}
+
+model HardCheckRun {
+  id                 String @id @default(uuid()) @db.Uuid
+  candidateId        String @db.Uuid
+  candidateVersionId String @db.Uuid
+  status             HardCheckRunStatus @default(QUEUED)
+  rulesetVersion     String @default("v1")
+  startedAt          DateTime @default(now())
+  completedAt        DateTime?
+  createdBy          String @db.Uuid
+  createdAt          DateTime @default(now())
+  candidate          Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidateVersion   CandidateVersion @relation(fields: [candidateVersionId], references: [id], onDelete: Cascade)
+  checks             HardCheck[]
+  @@index([candidateId, startedAt])
+}
+
+model HardCheck {
+  id          String @id @default(uuid()) @db.Uuid
+  runId       String @db.Uuid
+  ruleId      String
+  ruleVersion String
+  severity    HardCheckSeverity
+  status      HardCheckStatus
+  message     String
+  evidence    Json?
+  createdAt   DateTime @default(now())
+  run         HardCheckRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  @@index([runId, ruleId])
+}
+
+model Experiment {
+  id                 String @id @default(uuid()) @db.Uuid
+  workspaceId        String @db.Uuid
+  experimentNo       String
+  name               String
+  status             ExperimentStatus @default(DRAFT)
+  rubricVersion      String @default("v1")
+  protocol           Json
+  seedHash           String?
+  startsAt           DateTime?
+  closesAt           DateTime?
+  frozenAt           DateTime?
+  closedAt           DateTime?
+  createdBy          String   @db.Uuid
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  briefs             ExperimentBrief[]
+  pairs              ExperimentPair[]
+  candidates         Candidate[]
+  comparisons        PairwiseComparison[]
+  @@unique([workspaceId, experimentNo])
+}
+
+model ExperimentBrief {
+  id            String @id @default(uuid()) @db.Uuid
+  experimentId  String @db.Uuid
+  briefId       String @db.Uuid
+  briefVersionId String @db.Uuid
+  createdAt     DateTime @default(now())
+  experiment    Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  brief         Brief @relation(fields: [briefId], references: [id])
+  @@unique([experimentId, briefId])
+}
+
+model ExperimentPair {
+  id                    String @id @default(uuid()) @db.Uuid
+  workspaceId           String @db.Uuid
+  experimentId          String @db.Uuid
+  briefId               String @db.Uuid
+  pairNo                String
+  leftCandidateId       String @db.Uuid
+  leftCandidateVersionId String @db.Uuid
+  leftContentHash       String
+  rightCandidateId      String @db.Uuid
+  rightCandidateVersionId String @db.Uuid
+  rightContentHash      String
+  isHighValue           Boolean @default(false)
+  adjudicatedPreference Preference?
+  adjudicatedCandidateId String? @db.Uuid
+  adjudicationReason   String?
+  adjudicatedBy         String? @db.Uuid
+  adjudicatedAt         DateTime?
+  status                ExperimentPairStatus @default(PENDING)
+  createdAt             DateTime @default(now())
+  experiment            Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  comparisons           PairwiseComparison[]
+  @@unique([experimentId, pairNo])
+  @@index([experimentId, status])
+}
+
+model PairwiseComparison {
+  id                         String @id @default(uuid()) @db.Uuid
+  workspaceId                String @db.Uuid
+  experimentId               String @db.Uuid
+  experimentPairId           String @db.Uuid
+  taskId                     String @db.Uuid
+  reviewerId                 String @db.Uuid
+  presentedLeftCandidateId   String @db.Uuid
+  presentedRightCandidateId  String @db.Uuid
+  preference                 Preference
+  preferredCandidateId       String? @db.Uuid
+  rationale                  String
+  confidence                 Int
+  blindPayloadHash           String
+  presentedAt                DateTime @default(now())
+  submittedAt                DateTime @default(now())
+  hardCheckAcknowledged      Boolean @default(false)
+  hardCheckNotes             String?
+  durationMs                 Int?
+  version                    Int @default(1)
+  supersedesId               String? @db.Uuid
+  status                     ReviewVersionStatus @default(SUBMITTED)
+  experiment                 Experiment @relation(fields: [experimentId], references: [id])
+  experimentPair             ExperimentPair @relation(fields: [experimentPairId], references: [id])
+  task                       ReviewTask @relation(fields: [taskId], references: [id])
+  scores                     PairwiseScore[]
+  @@unique([taskId, version])
+  @@index([experimentPairId, reviewerId])
+}
+
+model PairwiseScore {
+  id           String @id @default(uuid()) @db.Uuid
+  comparisonId String @db.Uuid
+  side         String
+  dimensionCode String
+  score        Int?
+  isNa         Boolean @default(false)
+  comparison   PairwiseComparison @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
+  @@unique([comparisonId, side, dimensionCode])
+}
+
+model Dataset {
+  id                 String @id @default(uuid()) @db.Uuid
+  workspaceId        String @db.Uuid
+  datasetNo          String
+  version            Int @default(1)
+  name               String
+  type               DatasetType
+  status             DatasetStatus @default(DRAFT)
+  format             DatasetFormat @default(WECRAFT_V1)
+  rubricVersion      String @default("v1")
+  filterSnapshot     Json @default("{}")
+  rightsSnapshot     Json @default("{}")
+  eligibilitySnapshot Json @default("{}")
+  itemCount          Int @default(0)
+  manifestHash       String?
+  createdBy          String @db.Uuid
+  approvedBy         String? @db.Uuid
+  approvedAt         DateTime?
+  frozenAt           DateTime?
+  revokedBy          String? @db.Uuid
+  revokedAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  items              DatasetItem[]
+  exports            DatasetExport[]
+  @@unique([workspaceId, datasetNo, version])
+}
+
+model DatasetItem {
+  id                String @id @default(uuid()) @db.Uuid
+  workspaceId       String @db.Uuid
+  datasetId         String @db.Uuid
+  itemType          DatasetItemType
+  briefId           String? @db.Uuid
+  caseId            String? @db.Uuid
+  counterexampleId  String? @db.Uuid
+  candidateId       String? @db.Uuid
+  comparisonId      String? @db.Uuid
+  split             Split?
+  status            DatasetItemStatus @default(READY)
+  exclusionReason   String?
+  snapshot          Json
+  contentHash       String
+  rightsSnapshot    Json
+  sortOrder         Int @default(0)
+  createdAt         DateTime @default(now())
+  dataset           Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  @@index([datasetId, itemType])
+}
+
+model DatasetExport {
+  id              String @id @default(uuid()) @db.Uuid
+  datasetId       String @db.Uuid
+  datasetVersion  Int
+  exportNo        String
+  format          DatasetFormat
+  status          DatasetExportStatus @default(PENDING)
+  fileId          String? @db.Uuid
+  manifestFileId  String? @db.Uuid
+  contentHash     String?
+  sizeBytes       BigInt?
+  exportedBy      String @db.Uuid
+  exportedAt      DateTime?
+  expiresAt       DateTime?
+  downloadCount   Int @default(0)
+  lastDownloadedAt DateTime?
+  lastDownloadedBy String? @db.Uuid
+  revokedAt       DateTime?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  dataset         Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  @@unique([datasetId, exportNo])
+  @@index([datasetId, createdAt])
+}
+
+model AuditLog {
+  id           BigInt @id @default(autoincrement())
+  workspaceId  String @db.Uuid
+  actorId      String? @db.Uuid
+  actorType    String @default("USER")
+  action       String
+  resourceType String
+  resourceId   String?
+  before       Json?
+  after        Json?
+  reason       String?
+  requestId    String
+  ip           String?
+  userAgent    String?
+  prevHash     String?
+  entryHash    String
+  occurredAt   DateTime @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, occurredAt])
+  @@index([action, occurredAt])
+}
+
+model Notification {
+  id           String @id @default(uuid()) @db.Uuid
+  workspaceId  String @db.Uuid
+  recipientId  String @db.Uuid
+  type         String
+  title        String
+  resourceType String?
+  resourceId   String?
+  deepLink     String
+  dedupeKey    String @unique
+  channel      NotificationChannel @default(IN_APP)
+  status       NotificationStatus @default(PENDING)
+  attempts     Int @default(0)
+  sentAt       DateTime?
+  readAt       DateTime?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([recipientId, readAt, createdAt])
+}
+
+model LegalHold {
+  id          String @id @default(uuid()) @db.Uuid
+  workspaceId String @db.Uuid
+  scopeType   LegalHoldScope
+  scopeId     String? @db.Uuid
+  status      LegalHoldStatus @default(ACTIVE)
+  reason      String
+  approvedBy  String @db.Uuid
+  startsAt    DateTime @default(now())
+  releasedBy  String? @db.Uuid
+  releasedAt  DateTime?
+  createdAt   DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}

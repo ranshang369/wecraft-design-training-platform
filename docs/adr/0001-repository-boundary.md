@@ -11,7 +11,7 @@
 
 ## 决策
 
-1. 平台使用独立的私有仓库 `wecraft-design-training-platform`，不 fork WeCraft，不使用 Git submodule。
+1. 平台使用独立的公开协作仓库 `wecraft-design-training-platform`，不 fork WeCraft，不使用 Git submodule。
 2. 平台拥有独立 CI、数据库、对象存储、飞书应用、环境变量和测试环境。
 3. 不直接 import `apps/web`、`apps/server` 或生产 `packages/shared` 源码。
 4. 两端只通过版本化契约集成：JSON Schema、OpenAPI、JSONL/ZIP 数据集。
@@ -21,7 +21,7 @@
 
 ## 后果
 
-- 伙伴权限可限制在平台仓库，不暴露生产代码和部署秘密。
+- 代码、产品文档和演示数据可公开查看和协作；生产代码、部署秘密、真实授权证据和真实用户内容仍必须与仓库隔离。
 - 平台可独立归档，不污染生产仓库。
 - 数据模型、授权字段和契约变更需要 WeCraft 负责人审批。
 - 两端需要维护版本兼容约定；跨仓库集成测试由契约样例和导出包校验承担。
@@ -30,6 +30,7 @@
 ## 强制约束
 
 - 禁止提交生产 `.env`、数据库连接串、对象存储密钥或飞书凭据。
+- 公开仓库中的任何示例必须使用虚构 Workspace、`example.test` 邮箱和非敏感演示素材。
 - 禁止把生产源码复制进本仓库，除非经过独立的安全与授权评审。
 - 任何契约破坏性变更必须新增版本目录并更新 ADR。
 - 数据库迁移、授权字段和 `contracts/v1` 的 CODEOWNERS 必须包含 WeCraft 负责人。

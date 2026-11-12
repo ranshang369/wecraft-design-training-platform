@@ -22,7 +22,7 @@ WeCraft 的内部设计训练数据平台。它把 Brief、优质案例、反例
 
 - Next.js 15 App Router + React 19，模块化单体。
 - Route Handlers 实现 `/api/v1/*`，Zod 负责输入校验。
-- PostgreSQL 16 + Prisma 6；对象存储接口当前实现为本地文件，部署时挂载持久卷。
+- PostgreSQL 16 + Prisma 6；文件存储支持本地目录或 PostgreSQL `BYTEA`，免费云部署使用数据库存储避免临时磁盘丢文件。
 - `sanitize-html` 清洗 HTML；`playwright-core` 在服务端隔离浏览器中执行 375px 布局与对比度检查。
 - Playwright 用于核心流程 E2E，Vitest 用于单元测试。
 
@@ -70,7 +70,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE="C:/Program Files/Google/Chrome/Application/chrom
 
 ## 演示账号
 
-密码统一为 `Demo1234!`，Workspace ID 为 `00000000-0000-4000-8000-000000000001`。
+本地种子密码统一为 `Demo1234!`，Workspace ID 为 `00000000-0000-4000-8000-000000000001`。公网免费演示实例使用部署时单独生成的强密码，不在仓库中公开。
 
 | 邮箱 | 角色 |
 | --- | --- |
@@ -108,12 +108,19 @@ E2E 依赖干净种子数据。重新跑之前先执行 `npm run db:seed`。当�
 
 本地已验证 Node.js 22、PostgreSQL、Chrome 路径下的 typecheck、单测、构建和 E2E。Dockerfile / Compose 尚未在本次机器实测，正式验收前需在干净 Linux 环境按部署文档跑通。
 
+## 完全免费的公网演示
+
+源码与 CI 位于 GitHub；运行环境使用 Render Free Web + Render Free PostgreSQL，不使用付费域名、持久盘或后台 worker。免费环境通过 `STORAGE_DRIVER=database` 把截图、HTML 和导出 ZIP 存入 PostgreSQL，因此 Web 休眠或重启不会丢失文件。
+
+免费实例适合演示和轻量协作，不等于生产环境：15 分钟无请求会休眠，首次唤醒较慢；免费 PostgreSQL 仅 1 GB、无备份、可能重启，并在创建 30 天后过期。完整限制与部署步骤见[Render Free 部署说明](docs/operations/render-free.md)。
+
 ## 文档
 
 - [产品 PRD](docs/prd.md)
 - [v1.0 产品冻结包](docs/v1.0/README.md)
 - [实际 API 文档](docs/api.md)
 - [部署与运维](docs/operations/deployment.md)
+- [Render Free 部署](docs/operations/render-free.md)
 - [安全、审计与备份](docs/operations/security-backup.md)
 - [测试报告](docs/test-report.md)
 - [已知限制与后续计划](docs/known-limitations.md)

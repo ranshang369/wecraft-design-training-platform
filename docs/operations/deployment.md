@@ -6,7 +6,7 @@ MVP 采用模块化单体：
 
 1. Next.js Web/API 进程（Node.js 22）。
 2. PostgreSQL 16，保存结构化数据、评审、候选元数据、数据集快照和审计。
-3. 持久卷，保存截图、HTML、导出 ZIP；通过 `StoredFile.objectKey` 访问。
+3. 文件存储：本地部署使用持久卷；无持久盘的免费云环境使用 PostgreSQL `StoredFileContent` 保存截图、HTML、导出 ZIP。
 4. 同一容器内的隔离 Chromium 渲染器，只执行硬检查；不执行用户脚本，不访问外网。
 
 平台不连接 WeCraft 生产数据库，不导入生产源码，不共享生产对象存储或飞书应用。
@@ -37,8 +37,11 @@ docker compose -f deploy/docker-compose.yml down
 | `SESSION_SECRET` | 否 | 预留配置；当前会话使用随机 opaque token 并只存 SHA-256 哈希。 |
 | `APP_URL` | 是 | 对外 HTTPS 地址，用于 Cookie 与后续飞书回调。 |
 | `COOKIE_SECURE` | 建议 | HTTPS 环境必须为 `true`。 |
-| `STORAGE_DRIVER` | 是 | 当前仅支持 `local`。 |
-| `STORAGE_ROOT` | 是 | 持久卷挂载点，例如 `/app/storage`。 |
+| `STORAGE_DRIVER` | 是 | `local` 或 `database`；无持久盘的免费云环境必须使用 `database`。 |
+| `STORAGE_ROOT` | 仅 local | 本地文件持久卷挂载点，例如 `/app/storage`。 |
+| `SITE_ACCESS_PASSWORD` | 公网建议 | 可选站点级 Basic Auth 口令；`/api/v1/health` 始终放行。 |
+| `DEMO_SEED_IF_EMPTY` | 演示可选 | 设为 `1` 时，空库自动播种；已有 Workspace 时跳过，不删除数据。 |
+| `DEMO_PASSWORD` | 演示可选 | 公网演示账号密码；必须使用强随机值，不得提交到 Git。 |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | 否 | 系统 Chrome/Chromium 路径；为空时使用 Playwright 默认浏览器。 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REDIRECT_URI` | 否 | 预留适配层；MVP 未启用 OAuth 与真实消息发送。 |
 | `PORT` | 否 | 默认 3000。 |
@@ -59,7 +62,8 @@ npm run start
 
 - `db:deploy` 只执行已提交迁移，不生成新迁移。
 - `db:migrate` 仅用于开发环境创建迁移。
-- `db:seed` 包含业务表清空，严禁指向生产库；脚本本身也会拒绝 `NODE_ENV=production` 和非 `wecraft_dt` 数据库。
+- `db:seed` 包含业务表清空，严禁指向生产库；脚本会拒绝未显式启用 `DEMO_SEED_IF_EMPTY=1` 的生产种子，并拒绝非 `wecraft_dt` 数据库。
+- 容器以 `DEMO_SEED_IF_EMPTY=1` 启动时，先检查 Workspace；已有数据则跳过，只有空库才执行演示种子。
 
 ## 首次生产初始化
 
@@ -91,11 +95,20 @@ npm run bootstrap:admin
 
 ## 存储
 
-当前为本地文件存储，必须使用持久卷。生产建议迁移到 S3/OSS：
+支持两种驱动：
+
+- `local`：写入 `STORAGE_ROOT`，必须使用持久卷。
+- `database`：文件内容写入 PostgreSQL `StoredFileContent.data`，适用于 Render Free 等无持久盘环境；元数据仍存 `StoredFile`，通用 API 不会序列化二进制内容。
+
+生产规模建议迁移到 S3/OSS：
 
 - 开启服务端加密、版本控制、对象锁（如合规要求）和访问日志。
 - 生命周期：截图/HTML 与案例同寿命；临时导出 ZIP 15 分钟下载有效，7 天后可清理。
 - 对象键继续按 Workspace 隔离；读取时仍校验数据库中的 `workspaceId`。
+
+## Render Free
+
+完全免费的部署步骤、限制、环境变量和验收检查见[Render Free 部署说明](render-free.md)。免费 PostgreSQL 创建 30 天后过期；若需要长期运行，必须改用其他免费数据库额度或升级，并先完成备份/迁移演练。
 
 ## 发布与回滚
 

@@ -6,6 +6,10 @@ import { ApiError } from "./api";
 
 const root = path.resolve(process.env.STORAGE_ROOT ?? "./storage");
 
+function storageDriver() {
+  return (process.env.STORAGE_DRIVER ?? "local").toLowerCase();
+}
+
 function safeName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "asset";
 }
@@ -18,6 +22,24 @@ export async function saveFile(input: {
   purpose: string;
   createdBy?: string;
 }) {
+  if (storageDriver() === "database") {
+    const objectKey = path.posix.join(input.workspaceId, crypto.randomUUID());
+    return prisma.storedFile.create({
+      data: {
+        workspaceId: input.workspaceId,
+        provider: "database",
+        bucket: "postgres",
+        objectKey,
+        mimeType: input.mimeType,
+        sizeBytes: BigInt(input.bytes.length),
+        sha256: sha256(input.bytes),
+        purpose: input.purpose,
+        createdBy: input.createdBy,
+        content: { create: { data: Uint8Array.from(input.bytes) } },
+      },
+    });
+  }
+
   const objectKey = path.posix.join(input.workspaceId, crypto.randomUUID() + "-" + safeName(input.filename));
   const fullPath = path.join(root, objectKey);
   await mkdir(path.dirname(fullPath), { recursive: true });
@@ -45,6 +67,14 @@ export async function getFile(fileId: string, workspaceId: string) {
 
 export async function readStoredFile(fileId: string, workspaceId: string) {
   const file = await getFile(fileId, workspaceId);
+  if (file.provider === "database") {
+    const content = await prisma.storedFileContent.findUnique({
+      where: { storedFileId: file.id },
+      select: { data: true },
+    });
+    if (!content) throw new ApiError(404, "NOT_FOUND", "文件内容不存在");
+    return { file, bytes: Buffer.from(content.data) };
+  }
   const fullPath = path.join(root, file.objectKey);
   try {
     return { file, bytes: await readFile(fullPath) };

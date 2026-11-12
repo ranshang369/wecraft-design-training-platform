@@ -5,7 +5,7 @@ import { saveFile } from "../src/lib/storage";
 import { appendAudit } from "../src/lib/audit";
 
 const prisma = new PrismaClient();
-const PASSWORD = "Demo1234!";
+const PASSWORD = process.env.DEMO_PASSWORD ?? "Demo1234!";
 const W = "00000000-0000-4000-8000-000000000001";
 
 function hash(value: string) { return createHash("sha256").update(value).digest("hex"); }
@@ -33,7 +33,15 @@ async function seedFile(workspaceId: string, actorId: string, name: string, mime
 }
 
 async function main() {
-  if (process.env.NODE_ENV === "production") throw new Error("Refusing to seed production");
+  const seedIfEmpty = process.env.DEMO_SEED_IF_EMPTY === "1";
+  if (process.env.NODE_ENV === "production" && !seedIfEmpty) throw new Error("Refusing to seed production without DEMO_SEED_IF_EMPTY=1");
+  if (seedIfEmpty) {
+    const existingWorkspaces = await prisma.workspace.count();
+    if (existingWorkspaces > 0) {
+      console.log("Demo seed skipped: workspace already contains data.");
+      return;
+    }
+  }
   if (!process.env.DATABASE_URL?.includes("wecraft_dt") && process.env.ALLOW_SEED_RESET !== "1") {
     throw new Error("Seed reset is restricted to the wecraft_dt database");
   }
@@ -197,7 +205,6 @@ async function main() {
   await appendAudit(prisma, { workspaceId: W, actorId: owner, action: "SEED_DEMO_DATA", resourceType: "WORKSPACE", resourceId: W, reason: "Demo workspace seed", requestId: crypto.randomUUID() });
 
   console.log("Seeded workspace", workspace.slug);
-  console.log("Demo password:", PASSWORD);
   console.log("Users:", userDefs.map(([, email]) => email).join(", "));
 }
 

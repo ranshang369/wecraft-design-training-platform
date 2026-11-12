@@ -1,7 +1,7 @@
 # 测试报告：WeCraft 设计训练协作平台 MVP
 
 > 验证日期：2026-11-12  
-> 结论：MVP 的三条核心流程、权限边界和关键安全校验通过本地自动化验证，可用于内部演示与验收评审。Docker Compose 镜像构建未在本次机器上执行。
+> 结论：MVP 的三条核心流程、权限边界和关键安全校验通过本地自动化验证；数据库文件存储和站点访问门禁也已单独验证，可用于内部演示与免费云部署验收。Docker Compose 镜像构建未在本次机器上执行。
 
 ## 1. 验证范围
 
@@ -35,6 +35,8 @@
 | `npm run build` | 通过 | Next.js 生产构建成功，29 个路由完成静态/动态产物生成 |
 | `npm run db:seed` | 通过 | 重建演示 Workspace、账号、Brief、案例、反例、实验和数据集 |
 | `npm run test:e2e` | 通过 | 10/10 Playwright E2E 通过，耗时约 56 秒 |
+| `STORAGE_DRIVER=database` + E2E | 通过 | 10/10 E2E 通过，截图、HTML 与导出文件均从 PostgreSQL 读取 |
+| Basic Auth 门禁 | 通过 | 健康检查 200；未带口令的 `/login` 为 401；带正确口令为 200 |
 
 构建与 E2E 均在依赖升级到 Next.js `15.5.29`、Vitest `5.1.0`、`sanitize-html` `2.18.2` 之后重跑。
 
@@ -85,10 +87,12 @@
 - 评审提交使用不可原地修改的版本模型；修订创建新记录并标记旧记录 `SUPERSEDED`。
 - 数据集导出再次检查授权和版本漂移，冻结案例版本、授权快照和 manifest hash。
 - 审计日志使用哈希链；测试可从数据库记录独立复算每条 `entryHash`。
+- 免费云部署使用 `STORAGE_DRIVER=database`；E2E 已覆盖数据库文件读取，页面与数据集导出不依赖本地磁盘。
+- 可选 `SITE_ACCESS_PASSWORD` 在所有页面启用 Basic Auth，但始终放行 Render 健康检查 `/api/v1/health`。
 
 ## 8. 已知测试缺口
 
-- Dockerfile 和 Docker Compose 未在本机实测；当前机器没有 Docker。
+- Dockerfile 和 Docker Compose 未在本机实测；当前机器没有 Docker。Render Free 的远程 Docker 构建结果以部署日志和公网验收为准。
 - 未执行压力测试、并发基准、可访问性扫描和真实飞书 OAuth/消息集成测试。
 - 未执行真实数据库/对象存储备份恢复演练；仓库只包含运维方案。
 - 当前 `npm audit` 报告 13 个漏洞：6 moderate、7 high、0 critical。主要修复需要 Next.js、Prisma、Zod、Archiver 大版本升级，未在 MVP 收口阶段强行升级。

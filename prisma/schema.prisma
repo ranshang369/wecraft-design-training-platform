@@ -688,9 +688,16 @@ model StoredFile {
   createdAt         DateTime @default(now())
   deletedAt         DateTime?
   workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  content           StoredFileContent?
   caseAssets        CaseAsset[]
   counterexampleAssets CounterexampleAsset[]
   candidateAssets   CandidateAsset[]
+}
+
+model StoredFileContent {
+  storedFileId String @id @db.Uuid
+  data         Bytes
+  storedFile   StoredFile @relation(fields: [storedFileId], references: [id], onDelete: Cascade)
 }
 
 model Candidate {

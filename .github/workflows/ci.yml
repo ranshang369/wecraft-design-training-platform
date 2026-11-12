@@ -31,8 +31,7 @@ jobs:
       SESSION_SECRET: ci-only-session-secret-0123456789abcdef
       APP_URL: http://127.0.0.1:3000
       COOKIE_SECURE: "false"
-      STORAGE_DRIVER: local
-      STORAGE_ROOT: ./storage
+      STORAGE_DRIVER: database
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4

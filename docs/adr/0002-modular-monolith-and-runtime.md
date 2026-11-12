@@ -16,7 +16,7 @@ MVP 采用：
 - Next.js App Router + TypeScript，承载页面与 `/api/v1` Route Handlers。
 - PostgreSQL + Prisma，负责事务、版本化、授权快照和审计链。
 - 业务规则集中在 `src/server/services`，路由只做鉴权、输入校验和响应映射。
-- 文件通过 `StorageAdapter` 抽象：本地文件系统用于开发/演示，S3/OSS 私有桶用于部署。
+- 文件通过 `StorageAdapter` 抽象：本地目录用于开发，PostgreSQL `BYTEA` 用于无持久盘的免费云部署，S3/OSS 私有桶用于规模化部署。
 - HTML 预览与截图在隔离 runner 中执行；主应用不直接执行用户 HTML。
 - 后续如需独立 API，将 `services` 与 DTO 平移到 Fastify；数据库和契约不变。
 

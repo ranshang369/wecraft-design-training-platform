@@ -1,12 +1,18 @@
 # 部署与运维
 
+## 当前稳定公网环境
+
+训练平台当前运行于 <https://wecraft-training.zer-go.cn>，使用独立 Docker Compose Stack、PostgreSQL 16 和 Caddy HTTPS，部署在 Ubuntu 22.04 ECS 上。成员使用邮箱和密码直接登录；演示账号密码只通过受控渠道分发，不写入 Git 或公开文档。
+
+完整拓扑、重新部署、验收、更新回滚与备份步骤见[稳定公网部署](stable-public.md)。训练 Stack 不连接 WeCraft 生产数据库，只借用现有 Caddy 的边缘网络入口。
+
 ## 运行拓扑
 
 MVP 采用模块化单体：
 
 1. Next.js Web/API 进程（Node.js 22）。
 2. PostgreSQL 16，保存结构化数据、评审、候选元数据、数据集快照和审计。
-3. 文件存储：本地部署使用持久卷；无持久盘的免费云环境使用 PostgreSQL `StoredFileContent` 保存截图、HTML、导出 ZIP。
+3. 文件存储：本地部署使用持久卷；无持久盘的云环境使用 PostgreSQL `StoredFileContent` 保存截图、HTML、导出 ZIP。
 4. 同一容器内的隔离 Chromium 渲染器，只执行硬检查；不执行用户脚本，不访问外网。
 
 平台不连接 WeCraft 生产数据库，不导入生产源码，不共享生产对象存储或飞书应用。
@@ -37,9 +43,9 @@ docker compose -f deploy/docker-compose.yml down
 | `SESSION_SECRET` | 否 | 预留配置；当前会话使用随机 opaque token 并只存 SHA-256 哈希。 |
 | `APP_URL` | 是 | 对外 HTTPS 地址，用于 Cookie 与后续飞书回调。 |
 | `COOKIE_SECURE` | 建议 | HTTPS 环境必须为 `true`。 |
-| `STORAGE_DRIVER` | 是 | `local` 或 `database`；无持久盘的免费云环境必须使用 `database`。 |
+| `STORAGE_DRIVER` | 是 | `local` 或 `database`；无持久盘的云环境必须使用 `database`。 |
 | `STORAGE_ROOT` | 仅 local | 本地文件持久卷挂载点，例如 `/app/storage`。 |
-| `SITE_ACCESS_PASSWORD` | 公网建议 | 可选站点级 Basic Auth 口令；`/api/v1/health` 始终放行。 |
+| `SITE_ACCESS_PASSWORD` | 可选 | 站点级 Basic Auth 口令；启用时 `/api/v1/health` 始终放行。稳定公网当前留空，直接使用邮箱密码登录。 |
 | `DEMO_SEED_IF_EMPTY` | 演示可选 | 设为 `1` 时，空库自动播种；已有 Workspace 时跳过，不删除数据。 |
 | `DEMO_PASSWORD` | 演示可选 | 公网演示账号密码；必须使用强随机值，不得提交到 Git。 |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | 否 | 系统 Chrome/Chromium 路径；为空时使用 Playwright 默认浏览器。 |
@@ -84,7 +90,7 @@ npm run bootstrap:admin
 
 - 在 Nginx/Ingress/ALB 终止 TLS，转发到 `app:3000`。
 - 设置 `APP_URL=https://...` 与 `COOKIE_SECURE=true`。
-- 只允许组织内网或 SSO 网关访问；MVP 未内置公网防滥用策略。
+- 当前稳定环境为简化登录，只保留邮箱密码与 RBAC，未启用站点级 Basic Auth；MVP 尚未内置速率限制、WAF 或细粒度防滥用策略，只应向团队受控分发地址，真实试点仍建议置于组织 SSO 网关或 IP 允许列表之后。
 - 保留 `X-Forwarded-For` 与 `X-Request-Id`，审计会记录请求元数据。
 
 ## 渲染器
@@ -98,7 +104,7 @@ npm run bootstrap:admin
 支持两种驱动：
 
 - `local`：写入 `STORAGE_ROOT`，必须使用持久卷。
-- `database`：文件内容写入 PostgreSQL `StoredFileContent.data`，适用于 Render Free 等无持久盘环境；元数据仍存 `StoredFile`，通用 API 不会序列化二进制内容。
+- `database`：文件内容写入 PostgreSQL `StoredFileContent.data`，适用于稳定公网 Stack 与 Render Free 等无持久盘环境；元数据仍存 `StoredFile`，通用 API 不会序列化二进制内容。
 
 生产规模建议迁移到 S3/OSS：
 
@@ -106,9 +112,9 @@ npm run bootstrap:admin
 - 生命周期：截图/HTML 与案例同寿命；临时导出 ZIP 15 分钟下载有效，7 天后可清理。
 - 对象键继续按 Workspace 隔离；读取时仍校验数据库中的 `workspaceId`。
 
-## Render Free
+## Render Free（备用演示）
 
-完全免费的部署步骤、限制、环境变量和验收检查见[Render Free 部署说明](render-free.md)。免费 PostgreSQL 创建 30 天后过期；若需要长期运行，必须改用其他免费数据库额度或升级，并先完成备份/迁移演练。
+Render Free 不是当前稳定环境，只作为备用演示。完全免费的部署步骤、限制、环境变量和验收检查见[Render Free 部署说明](render-free.md)。免费 PostgreSQL 创建 30 天后过期；若需要长期运行，必须改用其他免费数据库额度或升级，并先完成备份/迁移演练。
 
 ## 发布与回滚
 

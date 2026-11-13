@@ -1,7 +1,7 @@
 # 测试报告：WeCraft 设计训练协作平台 MVP
 
-> 验证日期：2026-11-12  
-> 结论：MVP 的三条核心流程、权限边界和关键安全校验通过本地自动化验证；数据库文件存储和站点访问门禁也已单独验证，可用于内部演示与免费云部署验收。Docker Compose 镜像构建未在本次机器上执行。
+> 验证日期：2026-11-12；稳定公网补充验收：2026-11-13<br>
+> 结论：MVP 的三条核心流程、权限边界和关键安全校验通过本地自动化验证；数据库文件存储、站点访问门禁和 Docker Compose 稳定公网部署已完成补充验收，可用于内部演示与受控试点。
 
 ## 1. 验证范围
 
@@ -36,7 +36,7 @@
 | `npm run db:seed` | 通过 | 重建演示 Workspace、账号、Brief、案例、反例、实验和数据集 |
 | `npm run test:e2e` | 通过 | 10/10 Playwright E2E 通过，耗时约 56 秒 |
 | `STORAGE_DRIVER=database` + E2E | 通过 | 10/10 E2E 通过，截图、HTML 与导出文件均从 PostgreSQL 读取 |
-| Basic Auth 门禁 | 通过 | 健康检查 200；未带口令的 `/login` 为 401；带正确口令为 200 |
+| Basic Auth 门禁（可选） | 通过 | 中间件启用时未带口令的 `/login` 为 401、带正确口令为 200；稳定公网为简化登录当前关闭 |
 
 构建与 E2E 均在依赖升级到 Next.js `15.5.29`、Vitest `5.1.0`、`sanitize-html` `2.18.2` 之后重跑。
 
@@ -75,7 +75,7 @@
 | 仪表盘反映完成率和硬失败率 | 通过（实现并接入主流程） | 仪表盘查询服务与 E2E 主流程数据 |
 | 关键写操作有审计 | 通过 | E2E 4、10 |
 | 关键流程有自动化测试 | 通过 | 12 个单测 + 10 个 E2E |
-| 全新环境可按 README 启动 | 本地通过 | 本地依赖、迁移、种子、构建和启动路径已验证；Docker 路径未实测 |
+| 全新环境可按 README 启动 | 通过 | 本地依赖、迁移、种子、构建和启动路径已验证；Docker Compose 稳定公网 Stack 已完成部署验收 |
 
 ## 7. 安全与数据治理验证
 
@@ -87,12 +87,12 @@
 - 评审提交使用不可原地修改的版本模型；修订创建新记录并标记旧记录 `SUPERSEDED`。
 - 数据集导出再次检查授权和版本漂移，冻结案例版本、授权快照和 manifest hash。
 - 审计日志使用哈希链；测试可从数据库记录独立复算每条 `entryHash`。
-- 免费云部署使用 `STORAGE_DRIVER=database`；E2E 已覆盖数据库文件读取，页面与数据集导出不依赖本地磁盘。
-- 可选 `SITE_ACCESS_PASSWORD` 在所有页面启用 Basic Auth，但始终放行 Render 健康检查 `/api/v1/health`。
+- 稳定公网与备用免费云部署使用 `STORAGE_DRIVER=database`；E2E 已覆盖数据库文件读取，页面与数据集导出不依赖本地磁盘。
+- 可选 `SITE_ACCESS_PASSWORD` 在所有页面启用 Basic Auth，但始终放行健康检查 `/api/v1/health`；稳定公网当前省略该变量，直接进入邮箱密码登录。
 
 ## 8. 已知测试缺口
 
-- Dockerfile 和 Docker Compose 未在本机实测；当前机器没有 Docker。Render Free 的远程 Docker 构建结果以部署日志和公网验收为准。
+- Dockerfile 和 Docker Compose 已在 Ubuntu 22.04 稳定公网 Stack 实测；本次 Windows 开发机未运行容器，GitHub Actions 尚未构建镜像。
 - 未执行压力测试、并发基准、可访问性扫描和真实飞书 OAuth/消息集成测试。
 - 未执行真实数据库/对象存储备份恢复演练；仓库只包含运维方案。
 - 当前 `npm audit` 报告 13 个漏洞：6 moderate、7 high、0 critical。主要修复需要 Next.js、Prisma、Zod、Archiver 大版本升级，未在 MVP 收口阶段强行升级。

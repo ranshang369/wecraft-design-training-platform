@@ -5,8 +5,8 @@ import { api } from "@/lib/client";
 
 export function LoginForm() {
   const router = useRouter();
-  const [email, setEmail] = useState("owner@example.test");
-  const [password, setPassword] = useState("Demo1234!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   async function submit(event: React.FormEvent) {

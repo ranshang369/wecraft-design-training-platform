@@ -1,0 +1,76 @@
+name: wecraft-design-training
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wecraft_training}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-wecraft_dt}
+      TZ: Asia/Shanghai
+    volumes:
+      - training_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - internal
+    shm_size: 256mb
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/training/Dockerfile
+    init: true
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wecraft_training}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wecraft_dt}?schema=public
+      APP_URL: ${APP_URL:?APP_URL is required}
+      COOKIE_SECURE: "true"
+      STORAGE_DRIVER: database
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE: /usr/bin/chromium
+      TZ: Asia/Shanghai
+    expose:
+      - "3000"
+    networks:
+      internal:
+      edge:
+        aliases:
+          - wecraft-training-app
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 4
+      start_period: 90s
+    shm_size: 512mb
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+networks:
+  internal:
+    driver: bridge
+  edge:
+    external: true
+    name: wecraft-production_edge
+
+volumes:
+  training_db:

@@ -1,6 +1,7 @@
 # WeCraft 设计训练协作平台
 
-> 公开协作仓库：<https://github.com/ranshang369/wecraft-design-training-platform>  
+> 公开协作仓库：<https://github.com/ranshang369/wecraft-design-training-platform><br>
+> 稳定公网环境：<https://wecraft-training.zer-go.cn>（邮箱密码直接登录，演示密码通过受控渠道分发）<br>
 > 本仓库只包含虚构演示数据、产品文档和开发配置，不包含 WeCraft 生产源码、生产数据库、真实授权证据或真实用户内容。
 
 WeCraft 的内部设计训练数据平台。它把 Brief、优质案例、反例、候选设计、双评、盲测裁决、实验记录、数据集导出和审计放在同一个结构化工作台中。
@@ -22,7 +23,7 @@ WeCraft 的内部设计训练数据平台。它把 Brief、优质案例、反例
 
 - Next.js 15 App Router + React 19，模块化单体。
 - Route Handlers 实现 `/api/v1/*`，Zod 负责输入校验。
-- PostgreSQL 16 + Prisma 6；文件存储支持本地目录或 PostgreSQL `BYTEA`，免费云部署使用数据库存储避免临时磁盘丢文件。
+- PostgreSQL 16 + Prisma 6；文件存储支持本地目录或 PostgreSQL `BYTEA`，无持久盘部署使用数据库存储避免临时磁盘丢文件。
 - `sanitize-html` 清洗 HTML；`playwright-core` 在服务端隔离浏览器中执行 375px 布局与对比度检查。
 - Playwright 用于核心流程 E2E，Vitest 用于单元测试。
 
@@ -70,7 +71,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE="C:/Program Files/Google/Chrome/Application/chrom
 
 ## 演示账号
 
-本地种子密码统一为 `Demo1234!`，Workspace ID 为 `00000000-0000-4000-8000-000000000001`。公网免费演示实例使用部署时单独生成的强密码，不在仓库中公开。
+本地种子密码统一为 `Demo1234!`，Workspace ID 为 `00000000-0000-4000-8000-000000000001`。稳定公网环境使用部署时单独生成、通过受控渠道分发的强密码，不在仓库或公开文档中公开。
 
 | 邮箱 | 角色 |
 | --- | --- |
@@ -106,13 +107,13 @@ npm run test:e2e
 
 E2E 依赖干净种子数据。重新跑之前先执行 `npm run db:seed`。当前覆盖 10 条验收：案例入库、评审修订、盲测裁决、数据导出、恶意 HTML、375px 溢出、RBAC、跨 Workspace 隔离、Holdout 文件隔离和审计链复算。
 
-本地已验证 Node.js 22、PostgreSQL、Chrome 路径下的 typecheck、单测、构建和 E2E。Dockerfile / Compose 尚未在本次机器实测，正式验收前需在干净 Linux 环境按部署文档跑通。
+本地已验证 Node.js 22、PostgreSQL、Chrome 路径下的 typecheck、单测、构建和 E2E。稳定公网环境已在 Ubuntu 22.04、Docker Compose 与 Caddy 上完成容器部署、HTTPS、Chromium 硬检查、文件读取和数据持久化冒烟测试。
 
-## 完全免费的公网演示
+## 公网环境
 
-源码与 CI 位于 GitHub；运行环境使用 Render Free Web + Render Free PostgreSQL，不使用付费域名、持久盘或后台 worker。免费环境通过 `STORAGE_DRIVER=database` 把截图、HTML 和导出 ZIP 存入 PostgreSQL，因此 Web 休眠或重启不会丢失文件。
+当前稳定环境使用独立 Docker Compose Stack、PostgreSQL 16 和 Caddy HTTPS，部署在现有 Ubuntu 22.04 ECS 上；文件通过 `STORAGE_DRIVER=database` 写入 PostgreSQL。它不依赖 Render Free 的休眠实例、30 天数据库或临时隧道。访问方式、隔离边界、验收与回滚见[稳定公网部署](docs/operations/stable-public.md)。
 
-免费实例适合演示和轻量协作，不等于生产环境：15 分钟无请求会休眠，首次唤醒较慢；免费 PostgreSQL 仅 1 GB、无备份、可能重启，并在创建 30 天后过期。完整限制与部署步骤见[Render Free 部署说明](docs/operations/render-free.md)。
+Render Free 保留为备用演示方案：免费 Web 服务 15 分钟无请求会休眠，免费 PostgreSQL 仅 1 GB、无备份、可能重启，并在创建 30 天后过期。完整限制与部署步骤见[Render Free 部署说明](docs/operations/render-free.md)。
 
 ## 文档
 
@@ -120,6 +121,7 @@ E2E 依赖干净种子数据。重新跑之前先执行 `npm run db:seed`。当�
 - [v1.0 产品冻结包](docs/v1.0/README.md)
 - [实际 API 文档](docs/api.md)
 - [部署与运维](docs/operations/deployment.md)
+- [稳定公网部署](docs/operations/stable-public.md)
 - [Render Free 部署](docs/operations/render-free.md)
 - [安全、审计与备份](docs/operations/security-backup.md)
 - [测试报告](docs/test-report.md)

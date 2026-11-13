@@ -13,9 +13,9 @@ export default async function LoginPage() {
     <section className="login-card">
       <div className="login-box">
         <h2>登录设计训练平台</h2>
-        <p className="muted small" style={{ margin: "8px 0 22px" }}>使用邀请邮箱登录。演示账号已预置，确认环境后再替换为飞书 OAuth。</p>
+        <p className="muted small" style={{ margin: "8px 0 22px" }}>使用分配的邮箱账号登录。账号和初始密码通过受控渠道分发，不在页面公开。</p>
         <LoginForm />
-        <div className="demo-list"><strong style={{ color: "var(--ink)" }}>演示账号 · 密码 Demo1234!</strong><div>owner@example.test · 项目负责人</div><div>lead@example.test · 设计负责人</div><div>annotator@example.test · 标注/QA</div><div>engineer@example.test · AI 工程</div><div>admin@example.test · 平台管理员</div></div>
+        {process.env.NODE_ENV !== "production" ? <div className="demo-list"><strong style={{ color: "var(--ink)" }}>本地演示账号 · 密码 Demo1234!</strong><div>owner@example.test · 项目负责人</div><div>lead@example.test · 设计负责人</div><div>annotator@example.test · 标注/QA</div><div>engineer@example.test · AI 工程</div><div>admin@example.test · 平台管理员</div></div> : null}
       </div>
     </section>
   </main>;

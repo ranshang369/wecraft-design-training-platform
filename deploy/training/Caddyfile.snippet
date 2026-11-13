@@ -1,0 +1,13 @@
+# Add this block to the production Caddyfile. The DNS A record must point to
+# 39.105.45.154 and Caddy will obtain a normal Let's Encrypt certificate.
+wecraft-training.zer-go.cn {
+  encode zstd gzip
+
+  reverse_proxy wecraft-training-app:3000
+
+  header {
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Strict-Transport-Security "max-age=31536000"
+  }
+}

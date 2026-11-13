@@ -19,7 +19,7 @@ export function LoginForm() {
     <div className="field"><label>邮箱</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required /></div>
     <div className="field"><label>密码</label><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></div>
     {error ? <div className="error-box">{error}</div> : null}
-    <button className="btn primary" disabled={loading} type="submit" style={{ height: 42 }}>{loading ? "登录中…" : "登录工作台"}</button>
+    <button className="btn primary cta" disabled={loading} type="submit" style={{ width: "100%", marginTop: 2 }}>{loading ? "登录中…" : "登录设计训练平台"}</button>
   </form>;
 }
 

@@ -7,7 +7,13 @@ export default async function LoginPage() {
   if (ctx) redirect("/dashboard");
   return <main className="login-page">
     <section className="login-intro">
-      <div><div style={{ fontSize: 11, letterSpacing: 2, opacity: .7, marginBottom: 36 }}>WECRAFT INTERNAL TOOL</div><h1>让设计训练数据<br />可评审，也可追溯。</h1><p style={{ marginTop: 24 }}>在这里完成 Brief、案例、反例、候选、盲测、裁决和数据导出。飞书仍然负责文档与沟通；平台只管理结构化资产和证据。</p></div>
+      <div>
+        <div className="login-brand"><span className="brand-mark">W</span><div><strong>WeCraft</strong><span>Design Training</span></div></div>
+        <div className="login-kicker">WECRAFT · INTERNAL DESIGN TRAINING</div>
+        <h1>让设计训练数据<br />可评审，也可追溯。</h1>
+        <p style={{ marginTop: 24 }}>在这里完成 Brief、案例、反例、候选、盲测、裁决和数据导出。飞书仍然负责文档与沟通；平台只管理结构化资产和证据。</p>
+        <div className="login-points"><span>案例与反例分离</span><span>双评与裁决</span><span>授权校验后导出</span></div>
+      </div>
       <div style={{ fontSize: 12, opacity: .7 }}>独立内部平台 · 不运行模型训练 · 不连接生产数据库</div>
     </section>
     <section className="login-card">

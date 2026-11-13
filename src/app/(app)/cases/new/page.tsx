@@ -1,5 +1,5 @@
 "use client";
-
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, useApi } from "@/lib/client";
@@ -62,6 +62,7 @@ export default function NewCasePage() {
     selfScores: Object.fromEntries(DIMENSIONS.map((dimension) => [dimension.code, 4])),
   });
   const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [previewTab, setPreviewTab] = useState<"screenshot" | "html">("screenshot");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -138,72 +139,77 @@ export default function NewCasePage() {
 
   return <>
     <PageHeader
-      title="新建优质案例"
-      description="按真实阅读任务选择起稿起点，再记录正文承接与七项视觉语法。截图和 HTML 只是证据，可迁移的机制才是训练资产。"
-      action={<a className="btn" href="/cases">返回案例库</a>}
+      title="录入优质案例"
+      description="按真实阅读任务选择起稿起点，再记录正文承接与七项视觉语法。截图和 HTML 是证据，可迁移的机制才是训练资产。"
+      action={<><Link className="btn" href="/cases">返回案例库</Link><button className="btn primary cta" type="submit" form="case-create-form" disabled={loading}><span className="cta-plus">＋</span>{loading ? "保存中…" : "保存案例"}</button></>}
     />
-    <form onSubmit={submit} className="split-view">
+    <form id="case-create-form" onSubmit={submit} className="split-view">
       <div className="grid preview-sticky">
-        <div className="card">
-          <div className="card-head"><h2>375px 截图</h2>{screenshot ? <span className="badge green">已上传</span> : <span className="badge gray">待上传</span>}</div>
-          {screenshot
-            ? <img className="preview-image" src={screenshot} alt="375px 案例截图预览" />
-            : <div className="empty" style={{ minHeight: 260 }}>上传宽度 375px 的截图<br /><span className="small">PNG / JPG / WEBP / SVG</span></div>}
-          <input className="input" style={{ marginTop: 12 }} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (file) setScreenshot(await fileToDataUrl(file));
-          }} />
-        </div>
-        <div className="card">
-          <h3>HTML 证据</h3>
-          <div className="small muted" style={{ margin: "6px 0 10px" }}>最终预览会在服务端清洗后放入 sandbox iframe；这里展示的是原始案例文件。</div>
-          <textarea className="textarea tall mono" value={form.html} onChange={(event) => set("html", event.target.value)} />
-        </div>
-      </div>
-
-      <div className="card grid">
-        <div className="form-grid">
-          <div className="field full"><label>案例标题</label><input className="input" value={form.title} onChange={(event) => set("title", event.target.value)} required /></div>
-          <div className="field"><label>来源 Brief</label><select className="select" value={form.briefId} onChange={(event) => set("briefId", event.target.value)}><option value="">不关联</option>{briefs.data?.map((brief) => <option key={brief.id} value={brief.id}>{brief.briefNo} · {brief.title}</option>)}</select></div>
-          <div className="field"><label>来源类型</label><select className="select" value={form.sourceType} onChange={(event) => set("sourceType", event.target.value)}><option value="INTERNAL_ORIGINAL">内部原创</option><option value="USER_CONTENT">用户内容</option><option value="THIRD_PARTY">第三方</option><option value="PUBLIC_DOMAIN">公共领域</option></select></div>
-
-          <div className="field full">
-            <label>用户侧起稿起点（1–3 个，首个为主）</label>
-            <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-              {START_POINTS.map((point) => <label key={point.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "7px 9px", border: "1px solid var(--line)", borderRadius: 7, background: "#fffdf8" }}><input type="checkbox" checked={form.startPoints.includes(point.id)} onChange={() => toggleStartPoint(point.id)} /><span><strong>{point.label}</strong><span className="small muted" style={{ display: "block" }}>{point.description}</span></span></label>)}
+        <section className="card">
+          <div className="card-head">
+            <div><h2>案例证据</h2><div className="card-sub">评审看到的第一份视觉与结构证据</div></div>
+            <div className="preview-tabs" role="tablist" aria-label="案例证据类型">
+              <button type="button" role="tab" aria-selected={previewTab === "screenshot"} className={"preview-tab " + (previewTab === "screenshot" ? "active" : "")} onClick={() => setPreviewTab("screenshot")}>375px</button>
+              <button type="button" role="tab" aria-selected={previewTab === "html"} className={"preview-tab " + (previewTab === "html" ? "active" : "")} onClick={() => setPreviewTab("html")}>HTML</button>
             </div>
-            <span className="hint">九主型只保留为内部检索兼容，不再要求用户理解或选择。</span>
           </div>
-
-          <div className="field full">
-            <label>意图标签（可选）</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>{INTENT_TAGS.map((tag) => <label key={tag.id} style={{ display: "flex", gap: 5, alignItems: "center", padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 999, background: form.intentTags.includes(tag.id) ? "#f8e4da" : "#fffdf8" }}><input type="checkbox" checked={form.intentTags.includes(tag.id)} onChange={() => toggleIntentTag(tag.id)} />{tag.label}</label>)}</div>
+          {previewTab === "screenshot" ? <div className="evidence-tab-panel">
+            <div className={"upload-zone " + (screenshot ? "has-image" : "")}>
+              {screenshot ? <img className="preview-image" src={screenshot} alt="375px 案例截图预览" /> : <div className="empty" style={{ minHeight: 280 }}><strong>上传 375px 截图</strong><div className="small" style={{ marginTop: 6 }}>PNG / JPG / WebP / SVG，建议 375px 或 750px 宽</div></div>}
+              <input className="input" style={{ marginTop: 12 }} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (file) setScreenshot(await fileToDataUrl(file)); }} />
+            </div>
+            <div className="small muted" style={{ marginTop: 10 }}>{screenshot ? "已上传截图。提交后会作为当前版本的不可变视觉证据。" : "截图是必填项；没有移动端证据的案例不能提交审核。"}</div>
+          </div> : <div className="evidence-tab-panel">
+            <textarea className="textarea tall mono html-editor" value={form.html} onChange={(event) => set("html", event.target.value)} aria-label="HTML 证据" />
+            <div className="small muted" style={{ marginTop: 10 }}>保存前会清洗脚本、表单和外部资源；预览始终运行在沙箱 iframe 中。</div>
+          </div>}
+        </section>
+      </div>
+      <div className="grid">
+        <section className="form-section">
+          <div className="form-section-head"><div><h3>基本信息</h3><p>定义案例来源，并选择用户真实面对的起稿任务</p></div><span className="form-section-index">01</span></div>
+          <div className="form-grid">
+            <div className="field full"><label>案例标题</label><input className="input" value={form.title} onChange={(event) => set("title", event.target.value)} placeholder="一句话说明这个案例解决了什么问题" required /></div>
+            <div className="field"><label>来源 Brief</label><select className="select" value={form.briefId} onChange={(event) => set("briefId", event.target.value)}><option value="">不关联</option>{briefs.data?.map((brief) => <option key={brief.id} value={brief.id}>{brief.briefNo} · {brief.title}</option>)}</select></div>
+            <div className="field"><label>来源类型</label><select className="select" value={form.sourceType} onChange={(event) => set("sourceType", event.target.value)}><option value="INTERNAL_ORIGINAL">内部原创</option><option value="USER_CONTENT">用户内容</option><option value="THIRD_PARTY">第三方</option><option value="PUBLIC_DOMAIN">公共领域</option></select></div>
+            <div className="field full">
+              <label>用户侧起稿起点 <span className="field-note">1–3 个，首个为主</span></label>
+              <div className="choice-list">
+                {START_POINTS.map((point) => <label className={"choice-card " + (form.startPoints.includes(point.id) ? "selected" : "")} key={point.id}><input type="checkbox" checked={form.startPoints.includes(point.id)} onChange={() => toggleStartPoint(point.id)} /><span><strong>{point.label}</strong><span className="small muted">{point.description}</span></span></label>)}
+              </div>
+              <span className="hint">九主型只保留为内部检索兼容，不再要求用户理解或选择。</span>
+            </div>
+            <div className="field full">
+              <label>意图标签 <span className="field-note">可选</span></label>
+              <div className="tag-choice-list">{INTENT_TAGS.map((tag) => <label className={"tag-choice " + (form.intentTags.includes(tag.id) ? "selected" : "")} key={tag.id}><input type="checkbox" checked={form.intentTags.includes(tag.id)} onChange={() => toggleIntentTag(tag.id)} />{tag.label}</label>)}</div>
+            </div>
           </div>
-
-          <div className="field full"><label>适用内容条件</label><textarea className="textarea" value={form.applicableConditions} onChange={(event) => set("applicableConditions", event.target.value)} required /><span className="hint">什么内容适合使用这个机制？什么情况下必须放弃？</span></div>
-          <div className="field full"><label>设计机制（首屏 / 整体视觉判断）</label><textarea className="textarea" value={form.designMechanism} onChange={(event) => set("designMechanism", event.target.value)} required /></div>
-          <div className="field full"><label>正文承接机制</label><textarea className="textarea" value={form.bodyMechanism} onChange={(event) => set("bodyMechanism", event.target.value)} required /><span className="hint">首屏之后，章节如何继续兑现同一机制？不能只描述封面。</span></div>
-          <div className="field full"><label>结构签名</label><textarea className="textarea" value={form.structureSignature} onChange={(event) => set("structureSignature", event.target.value)} placeholder="例如：wide-image-entry > narrow-body > image-pause > human-action-close" required /><span className="hint">用至少三个可比较的阅读步骤描述骨架，便于检索与去重。</span></div>
-          <div className="field"><label>机制标签</label><input className="input" value={form.mechanismTags} onChange={(event) => set("mechanismTags", event.target.value)} placeholder="摄影拼贴，纸层错位，路线图" /><span className="hint">用逗号分隔</span></div>
-          <div className="field"><label>来源说明</label><input className="input" value={form.sourceNote} onChange={(event) => set("sourceNote", event.target.value)} required /></div>
-          <div className="field full"><label>反模式（每行一条）</label><textarea className="textarea" value={form.antiPatterns} onChange={(event) => set("antiPatterns", event.target.value)} placeholder="不要把所有图片做成同一矩形&#10;不要让每个章节都加一条细横线" /></div>
-        </div>
-
-        <section style={{ marginTop: 22 }}>
-          <div className="card-head"><div><h3>七项视觉语法</h3><div className="card-sub">记录可以被迁移到别的内容上的设计规则，不记录案例独有文案或资产。</div></div></div>
-          <div className="form-grid" style={{ marginTop: 12 }}>
+        </section>
+        <section className="form-section">
+          <div className="form-section-head"><div><h3>内容与机制</h3><p>说明内容为何需要这个机制，以及正文如何继续兑现它</p></div><span className="form-section-index">02</span></div>
+          <div className="form-grid">
+            <div className="field full"><label>适用内容条件</label><textarea className="textarea" value={form.applicableConditions} onChange={(event) => set("applicableConditions", event.target.value)} required /><span className="hint">什么内容适合使用这个机制？什么情况下必须放弃？</span></div>
+            <div className="field full"><label>设计机制（首屏 / 整体视觉判断）</label><textarea className="textarea" value={form.designMechanism} onChange={(event) => set("designMechanism", event.target.value)} required /></div>
+            <div className="field full"><label>正文承接机制</label><textarea className="textarea" value={form.bodyMechanism} onChange={(event) => set("bodyMechanism", event.target.value)} required /><span className="hint">首屏之后，章节如何继续兑现同一机制？不能只描述封面。</span></div>
+            <div className="field full"><label>结构签名</label><textarea className="textarea" value={form.structureSignature} onChange={(event) => set("structureSignature", event.target.value)} placeholder="例如：wide-image-entry > narrow-body > image-pause > human-action-close" required /><span className="hint">用至少三个可比较的阅读步骤描述骨架，便于检索与去重。</span></div>
+            <div className="field"><label>机制标签</label><input className="input" value={form.mechanismTags} onChange={(event) => set("mechanismTags", event.target.value)} placeholder="摄影拼贴，纸层错位，路线图" /><span className="hint">用逗号分隔</span></div>
+            <div className="field"><label>来源说明</label><input className="input" value={form.sourceNote} onChange={(event) => set("sourceNote", event.target.value)} required /></div>
+            <div className="field full"><label>反模式（每行一条）</label><textarea className="textarea" value={form.antiPatterns} onChange={(event) => set("antiPatterns", event.target.value)} placeholder="不要把所有图片做成同一矩形&#10;不要让每个章节都加一条细横线" /></div>
+          </div>
+        </section>
+        <section className="form-section">
+          <div className="form-section-head"><div><h3>七项视觉语法</h3><p>记录可以迁移到别的内容上的设计规则，不记录案例独有文案或资产</p></div><span className="form-section-index">03</span></div>
+          <div className="form-grid">
             {VISUAL_GRAMMAR_FIELDS.map((field) => <div className="field full" key={field.key}><label>{field.label}</label><textarea className="textarea" value={form.visualGrammar[field.key]} onChange={(event) => setVisual(field.key, event.target.value)} required /><span className="hint">{field.hint}</span></div>)}
           </div>
         </section>
-
-        <section style={{ marginTop: 22 }}>
-          <h3 style={{ marginBottom: 10 }}>六维自评</h3>
+        <section className="form-section">
+          <div className="form-section-head"><div><h3>六维自评</h3><p>1–5 分；无图时图片叙事可选 N/A</p></div><span className="form-section-index">04</span></div>
           <div className="score-grid">{DIMENSIONS.map((dimension) => <div className="score-field" key={dimension.code}><span>{dimension.label}{dimension.code === "IMAGE_NARRATIVE" ? <span className="hint">（无图可选 N/A）</span> : null}</span><select className="select" value={form.selfScores[dimension.code]} onChange={(event) => set("selfScores", { ...form.selfScores, [dimension.code]: event.target.value })}><option value="N/A">N/A</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></div>)}</div>
         </section>
-
         <div className="notice">授权字段默认全部为 false。案例创建后由 Owner / Design Lead 在详情页填写并保存授权证据；缺少七项视觉语法或正文承接机制的数据集将被阻断导出。</div>
         {error ? <div className="error-box">{error}</div> : null}
-        <div className="actions"><button className="btn primary" type="submit" disabled={loading}>{loading ? "保存中…" : "保存案例卡并进入详情"}</button></div>
+        <div className="form-actions"><div className="small muted">保存后不会覆盖历史版本；修改会生成新版本并重新进入评审。</div><button className="btn primary cta" type="submit" disabled={loading}><span className="cta-plus">＋</span>{loading ? "保存中…" : "保存案例卡并进入详情"}</button></div>
       </div>
     </form>
   </>;

@@ -6,11 +6,19 @@ import { ARCHETYPES } from "@/lib/constants";
 
 export default function DashboardPage() {
   const { data, error, loading } = useApi<any>("/dashboard");
+  const me = useApi<any>("/auth/me");
   if (loading) return <div className="loading">正在加载仪表盘…</div>;
   if (error) return <div className="error-box">{error}</div>;
   const readiness = data.readiness;
+  const roles: string[] = me.data?.roles ?? [];
+  const canEditCases = roles.some((role) => ["OWNER", "DESIGN_LEAD", "ANNOTATOR"].includes(role));
+  const canCreateDataset = roles.some((role) => ["OWNER", "DESIGN_LEAD", "AI_ENGINEER"].includes(role));
   return <>
-    <PageHeader title="设计训练工作台" description="把案例生产、评审一致性和训练数据准备放在同一张图上。指标只用于诊断，不替代评审判断。" action={<><Link className="btn" href="/cases/new">录入案例</Link><Link className="btn primary" href="/datasets">创建数据集</Link></>} />
+    <PageHeader title="设计训练工作台" description="一屏查看案例、授权、评审与盲测状态。所有指标都可回溯到具体记录。" />
+    {canEditCases || canCreateDataset ? <div className="quick-actions" style={{ gridTemplateColumns: canEditCases && canCreateDataset ? undefined : "1fr" }}>
+      {canEditCases ? <Link className="quick-action primary" href="/cases/new"><span className="quick-action-icon">＋</span><span className="quick-action-copy"><strong>录入设计案例</strong><small>上传 375px 截图，填写机制、证据与六维评分</small></span><span className="quick-action-arrow">→</span></Link> : null}
+      {canCreateDataset ? <Link className="quick-action" href="/datasets/new"><span className="quick-action-icon">＋</span><span className="quick-action-copy"><strong>创建数据集</strong><small>选择条目，完成授权校验、冻结与可追溯导出</small></span><span className="quick-action-arrow">→</span></Link> : null}
+    </div> : null}
     <div className="grid grid-4">
       <Stat label="优质案例" value={data.counts.eligibleCases + " / 30"} note={"案例总量 " + data.counts.cases + " · 目标 30–36"} />
       <Stat label="授权完整度" value={formatPercent(data.authorization.rate)} note={data.authorization.complete + " / " + data.authorization.eligible + " 个已批准案例证据已核验"} />

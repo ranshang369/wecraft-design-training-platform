@@ -118,6 +118,7 @@ Render Free 保留为备用演示方案：免费 Web 服务 15 分钟无请求�
 ## 文档
 
 - [产品 PRD](docs/prd.md)
+- [详细使用说明（飞书导入版）](docs/feishu-user-guide.md)
 - [v1.0 产品冻结包](docs/v1.0/README.md)
 - [实际 API 文档](docs/api.md)
 - [部署与运维](docs/operations/deployment.md)

@@ -4,6 +4,11 @@ import { hashObject, sha256 } from "./hash";
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
+function canonicalJson(value: unknown) {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
 export type AuditInput = {
   workspaceId: string;
   actorId?: string | null;
@@ -38,6 +43,8 @@ async function appendAuditUnlocked(db: Db, input: AuditInput) {
   });
   const requestId = input.requestId ?? crypto.randomUUID();
   const occurredAt = new Date();
+  const before = canonicalJson(input.before);
+  const after = canonicalJson(input.after);
   const payload = {
     workspaceId: input.workspaceId,
     actorId: input.actorId ?? null,
@@ -45,8 +52,8 @@ async function appendAuditUnlocked(db: Db, input: AuditInput) {
     action: input.action,
     resourceType: input.resourceType,
     resourceId: input.resourceId ?? null,
-    before: input.before ?? null,
-    after: input.after ?? null,
+    before,
+    after,
     reason: input.reason ?? null,
     requestId,
     ip: input.ip ?? null,
@@ -62,8 +69,8 @@ async function appendAuditUnlocked(db: Db, input: AuditInput) {
       action: input.action,
       resourceType: input.resourceType,
       resourceId: input.resourceId ?? null,
-      before: (input.before ?? undefined) as Prisma.InputJsonValue | undefined,
-      after: (input.after ?? undefined) as Prisma.InputJsonValue | undefined,
+      before: (before ?? undefined) as Prisma.InputJsonValue | undefined,
+      after: (after ?? undefined) as Prisma.InputJsonValue | undefined,
       reason: input.reason ?? null,
       requestId,
       ip: input.ip ?? null,

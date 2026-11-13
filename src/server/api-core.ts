@@ -67,10 +67,13 @@ function fullScores(value: Record<string, number | null>) {
   }
   return value;
 }
-function assertCaseReviewGate(reviews: Parameters<typeof aggregateReviewEvidence>[0]) {
+function assertCaseReviewGate(
+  reviews: Parameters<typeof aggregateReviewEvidence>[0],
+  options: { allowNonPublishable?: boolean } = {},
+) {
   const evidence = aggregateReviewEvidence(reviews);
   if (evidence.reviewers < 2) throw new ApiError(409, "INVALID_STATE", "必须有两名独立评审已提交");
-  if (!evidence.publishable) throw new ApiError(409, "INVALID_STATE", "存在未通过或需修改的评审，不能进入可用案例库");
+  if (!options.allowNonPublishable && !evidence.publishable) throw new ApiError(409, "INVALID_STATE", "存在未通过或需修改的评审，不能进入可用案例库");
   if (!evidence.scoresComplete) throw new ApiError(409, "INVALID_STATE", "双评六维分数不完整，不能进入可用案例库");
   if (!evidence.qualityFloorMet) throw new ApiError(409, "INVALID_STATE", "双评中位分未达到训练样例门槛（均分至少 4，单项至少 3）");
 }
@@ -394,7 +397,7 @@ export async function handleCore(request: Request, segments: string[], method: s
         const reviews = caseValue.reviews.filter((review) => (
           review.status === "SUBMITTED" && review.caseVersionId === caseValue.versions[0]?.id
         ));
-        assertCaseReviewGate(reviews);
+        assertCaseReviewGate(reviews, { allowNonPublishable: true });
         const grant = await prisma.authorizationGrant.findUnique({ where: { subjectType_subjectId: { subjectType: "CASE", subjectId: caseValue.id } } });
         if (!grant || grant.evidenceStatus !== "VERIFIED") throw new ApiError(409, "INVALID_STATE", "授权证据尚未核验");
       }

@@ -22,6 +22,12 @@ test("流程 A：案例创建、双评、分歧裁决与入库", async () => {
     expectStatus(created, 201);
     const caseId = (await readJson<{ id: string }>(created)).id;
 
+    expectStatus(await lead.put("/api/v1/cases/" + caseId + "/authorization", { data: {
+      canUseForGeneration: true, canUseForDisplay: true, canUseForTraining: true, canDeriveMechanism: true,
+      canUseForEvaluation: true, canShowPublicly: false, evidenceStatus: "VERIFIED",
+      evidenceNote: "E2E 内部原创样例，授权证据已核验", reason: "流程 A 入库前完成授权核验",
+    } }), 200);
+
     expectStatus(await annotator.post("/api/v1/cases/" + caseId + "/submit", { data: {} }), 200);
     expectStatus(await lead.post("/api/v1/cases/" + caseId + "/assign", { data: { reviewerIds: [IDS.admin, IDS.engineer] } }), 200);
 

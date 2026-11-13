@@ -12,6 +12,8 @@ import { saveFile } from "@/lib/storage";
 import { notify } from "@/lib/notifications";
 import { DIMENSION_CODES, DIMENSIONS } from "@/lib/constants";
 import { parseScreenshotDataUrl } from "@/lib/image";
+import { aggregateReviewEvidence } from "@/lib/review-aggregation";
+import { INTENT_TAG_IDS, START_POINT_IDS, caseMetadataIssues, inferInternalArchetype } from "@/lib/case-metadata";
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const inviteSchema = z.object({ email: z.string().email(), roleCode: z.enum(["OWNER","ADMIN","DESIGN_LEAD","CONTENT_LEAD","EDITOR","ANNOTATOR","AI_ENGINEER","VIEWER"]) });
@@ -29,9 +31,22 @@ const authorizationSchema = z.object({
   canDeriveMechanism: z.boolean(), canUseForGeneration: z.boolean(), canUseForDisplay: z.boolean(), canUseForTraining: z.boolean(), canUseForEvaluation: z.boolean(), canShowPublicly: z.boolean(),
   evidenceStatus: z.enum(["MISSING","PENDING","VERIFIED","REJECTED","EXPIRED","REVOKED"]).default("MISSING"), evidenceNote: z.string().optional(), reason: z.string().min(2),
 });
+const visualGrammarText = z.string().trim().min(1).max(600);
+const visualGrammarSchema = z.object({
+  surfaceMaterial: visualGrammarText,
+  typeSystem: visualGrammarText,
+  imageTreatment: visualGrammarText,
+  composition: visualGrammarText,
+  colorLight: visualGrammarText,
+  decorationAnnotations: visualGrammarText,
+  firstScreenAction: visualGrammarText,
+}).strict();
 const caseCreateSchema = z.object({
-  title: z.string().min(1), archetype: z.enum(["SELF_REFERENTIAL","MATERIAL","SCENE","GENRE","SCHEMA","INTERFACE","CITATION","PSYCHOLOGICAL","PROCESS"]), briefId: z.string().uuid().optional().nullable(),
-  applicableConditions: z.string().min(1), designMechanism: z.string().min(1), antiPatterns: z.array(z.string()).default([]), mechanismTags: z.array(z.string()).default([]), selfScores: scoresSchema,
+  title: z.string().min(1), archetype: z.enum(["SELF_REFERENTIAL","MATERIAL","SCENE","GENRE","SCHEMA","INTERFACE","CITATION","PSYCHOLOGICAL","PROCESS"]).optional(), briefId: z.string().uuid().optional().nullable(),
+  applicableConditions: z.string().min(1), designMechanism: z.string().min(1), bodyMechanism: z.string().trim().min(1).max(2_000),
+  startPoints: z.array(z.enum(START_POINT_IDS)).min(1).max(3), intentTags: z.array(z.enum(INTENT_TAG_IDS)).max(8).default([]),
+  structureSignature: z.string().trim().max(1_000).optional().default(""), visualGrammar: visualGrammarSchema,
+  antiPatterns: z.array(z.string()).default([]), mechanismTags: z.array(z.string()).default([]), selfScores: scoresSchema,
   sourceType: z.enum(["INTERNAL_ORIGINAL","USER_CONTENT","THIRD_PARTY","PUBLIC_DOMAIN"]).default("INTERNAL_ORIGINAL"), sourceNote: z.string().min(1),
   html: z.string().min(20), screenshotDataUrl: z.string().startsWith("data:image/"),
 });
@@ -51,6 +66,13 @@ function fullScores(value: Record<string, number | null>) {
     if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5)) throw new ApiError(400, "VALIDATION_ERROR", "评分必须是 1–5 整数");
   }
   return value;
+}
+function assertCaseReviewGate(reviews: Parameters<typeof aggregateReviewEvidence>[0]) {
+  const evidence = aggregateReviewEvidence(reviews);
+  if (evidence.reviewers < 2) throw new ApiError(409, "INVALID_STATE", "必须有两名独立评审已提交");
+  if (!evidence.publishable) throw new ApiError(409, "INVALID_STATE", "存在未通过或需修改的评审，不能进入可用案例库");
+  if (!evidence.scoresComplete) throw new ApiError(409, "INVALID_STATE", "双评六维分数不完整，不能进入可用案例库");
+  if (!evidence.qualityFloorMet) throw new ApiError(409, "INVALID_STATE", "双评中位分未达到训练样例门槛（均分至少 4，单项至少 3）");
 }
 async function nextNo(prefix: string, count: number) { return prefix + "-" + String(count + 1).padStart(4, "0"); }
 function isHoldoutAdmin(ctx: AuthContext) {
@@ -252,11 +274,14 @@ export async function handleCore(request: Request, segments: string[], method: s
     const input = await body(request, caseCreateSchema);
     await assertBriefReference(ctx, input.briefId);
     fullScores(input.selfScores);
+    const metadataIssues = caseMetadataIssues(input);
+    if (metadataIssues.length) throw new ApiError(422, "VALIDATION_ERROR", metadataIssues.join("；"));
     const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
     const count = await prisma.case.count({ where: { workspaceId: ctx.workspaceId } });
     const created = await prisma.$transaction(async (tx) => {
-      const caseValue = await tx.case.create({ data: { workspaceId: ctx.workspaceId, caseNo: await nextNo("CA", count), title: input.title, archetype: input.archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
-      const version = await tx.caseVersion.create({ data: { caseId: caseValue.id, version: 1, applicableConditions: input.applicableConditions, designMechanism: input.designMechanism, antiPatterns: input.antiPatterns, mechanismTags: input.mechanismTags, selfScores: input.selfScores, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
+      const archetype = input.archetype ?? inferInternalArchetype(input.startPoints);
+      const caseValue = await tx.case.create({ data: { workspaceId: ctx.workspaceId, caseNo: await nextNo("CA", count), title: input.title, archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
+      const version = await tx.caseVersion.create({ data: { caseId: caseValue.id, version: 1, applicableConditions: input.applicableConditions, designMechanism: input.designMechanism, bodyMechanism: input.bodyMechanism, startPoints: input.startPoints, intentTags: input.intentTags, structureSignature: input.structureSignature, visualGrammar: input.visualGrammar, antiPatterns: input.antiPatterns, mechanismTags: input.mechanismTags, selfScores: input.selfScores, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
       const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) });
       await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: screenshot.width, height: screenshot.height, isPrimary: true } });
@@ -297,12 +322,19 @@ export async function handleCore(request: Request, segments: string[], method: s
       const merged = {
         applicableConditions: input.applicableConditions ?? current.applicableConditions,
         designMechanism: input.designMechanism ?? current.designMechanism,
+        bodyMechanism: input.bodyMechanism ?? current.bodyMechanism,
+        startPoints: (input.startPoints ?? (Array.isArray(current.startPoints) ? current.startPoints : [])) as Prisma.InputJsonValue,
+        intentTags: (input.intentTags ?? (Array.isArray(current.intentTags) ? current.intentTags : [])) as Prisma.InputJsonValue,
+        structureSignature: input.structureSignature ?? current.structureSignature,
+        visualGrammar: (input.visualGrammar ?? current.visualGrammar ?? undefined) as Prisma.InputJsonValue | undefined,
         antiPatterns: input.antiPatterns ?? (current.antiPatterns as string[]),
         mechanismTags: input.mechanismTags ?? (current.mechanismTags as string[]),
         selfScores: input.selfScores ?? (current.selfScores as Record<string, number | null>),
         sourceType: input.sourceType ?? current.sourceType,
         sourceNote: input.sourceNote ?? current.sourceNote,
       };
+      const metadataIssues = caseMetadataIssues(merged);
+      if (metadataIssues.length) throw new ApiError(422, "VALIDATION_ERROR", metadataIssues.join("；"));
       const screenshotFile = screenshot ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes }) : null;
       const htmlFile = input.html ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) }) : null;
       const result = await prisma.$transaction(async (tx) => {
@@ -310,7 +342,9 @@ export async function handleCore(request: Request, segments: string[], method: s
         const screenshotFileId = screenshotFile?.id ?? screenshotAsset?.storedFileId;
         if (screenshotFileId) await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFileId, kind: "SCREENSHOT_375", width: screenshot?.width ?? screenshotAsset?.width ?? 375, height: screenshot?.height ?? screenshotAsset?.height ?? 600, isPrimary: true } });
         await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: htmlFile?.id ?? htmlAsset!.storedFileId, kind: "HTML" } });
-        const updated = await tx.case.update({ where: { id: caseValue.id }, data: { title: input.title ?? caseValue.title, archetype: input.archetype ?? caseValue.archetype, briefId: input.briefId === undefined ? caseValue.briefId : input.briefId, currentVersion: versionNo, status: "SUBMITTED", approvedBy: null, approvedAt: null, rowVersion: { increment: 1 } } });
+        const nextArchetype = input.archetype
+          ?? (input.startPoints ? inferInternalArchetype(input.startPoints) : caseValue.archetype);
+        const updated = await tx.case.update({ where: { id: caseValue.id }, data: { title: input.title ?? caseValue.title, archetype: nextArchetype, briefId: input.briefId === undefined ? caseValue.briefId : input.briefId, currentVersion: versionNo, status: "SUBMITTED", approvedBy: null, approvedAt: null, rowVersion: { increment: 1 } } });
         await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_VERSION_CREATED", resourceType: "CASE", resourceId: caseValue.id, before: { currentVersion: caseValue.currentVersion }, after: { currentVersion: versionNo }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
         return { ...updated, version };
       });
@@ -332,9 +366,8 @@ export async function handleCore(request: Request, segments: string[], method: s
     }
     if (method === "POST" && caseMatch[2] === "approve") {
       assertCapability(can.approveCases(ctx.roles));
-      const reviews = await prisma.caseReview.findMany({ where: { caseId: caseValue.id, caseVersionId: caseValue.versions[0].id, status: "SUBMITTED" } });
-      if (new Set(reviews.map((r) => r.reviewerId)).size < 2) throw new ApiError(409, "INVALID_STATE", "必须有两名评审已提交");
-      if (reviews.some((r) => r.recommendation !== "PUBLISHABLE")) throw new ApiError(409, "INVALID_STATE", "存在未通过或需修改的评审，不能批准");
+      const reviews = await prisma.caseReview.findMany({ where: { caseId: caseValue.id, caseVersionId: caseValue.versions[0].id, status: "SUBMITTED" }, include: { scores: true } });
+      assertCaseReviewGate(reviews);
       const grant = await prisma.authorizationGrant.findUnique({ where: { subjectType_subjectId: { subjectType: "CASE", subjectId: caseValue.id } } });
       if (!grant || grant.evidenceStatus !== "VERIFIED") throw new ApiError(409, "INVALID_STATE", "授权证据尚未核验");
       const updated = await prisma.case.update({ where: { id: caseValue.id }, data: { status: "ELIGIBLE", approvedBy: ctx.userId, approvedAt: new Date() } });
@@ -357,6 +390,14 @@ export async function handleCore(request: Request, segments: string[], method: s
     if (method === "POST" && caseMatch[2] === "resolve") {
       assertCapability(can.adjudicate(ctx.roles));
       const input = z.object({ outcome: z.enum(["ELIGIBLE","REJECTED","CHANGES_REQUESTED"]), reason: z.string().min(2) }).parse(await request.json());
+      if (input.outcome === "ELIGIBLE") {
+        const reviews = caseValue.reviews.filter((review) => (
+          review.status === "SUBMITTED" && review.caseVersionId === caseValue.versions[0]?.id
+        ));
+        assertCaseReviewGate(reviews);
+        const grant = await prisma.authorizationGrant.findUnique({ where: { subjectType_subjectId: { subjectType: "CASE", subjectId: caseValue.id } } });
+        if (!grant || grant.evidenceStatus !== "VERIFIED") throw new ApiError(409, "INVALID_STATE", "授权证据尚未核验");
+      }
       const updated = await prisma.case.update({ where: { id: caseValue.id }, data: { status: input.outcome, approvedBy: input.outcome === "ELIGIBLE" ? ctx.userId : undefined, approvedAt: input.outcome === "ELIGIBLE" ? new Date() : undefined } });
       await prisma.reviewTask.updateMany({ where: { type: "ARBITRATION", subjectId: caseValue.id, status: "ASSIGNED" }, data: { status: "SUBMITTED", submittedAt: new Date() } });
       await appendAudit(prisma, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_ARBITRATION_RESOLVED", resourceType: "CASE", resourceId: caseValue.id, after: input, reason: input.reason, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });

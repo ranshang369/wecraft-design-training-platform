@@ -5,7 +5,13 @@ import { api, useApi, formatDate } from "@/lib/client";
 import { PageHeader, Badge, Empty } from "@/components/ui";
 import { HtmlPreview } from "@/components/html-preview";
 import { ScoreTable } from "@/components/scoring";
-import { ARCHETYPES } from "@/lib/constants";
+import {
+  INTENT_TAGS,
+  START_POINTS,
+  VISUAL_GRAMMAR_FIELDS,
+  caseMetadataIssues,
+  startPointLabels,
+} from "@/lib/case-metadata";
 
 const SOURCE_LABELS: Record<string, string> = { INTERNAL_ORIGINAL: "内部原创", USER_CONTENT: "用户内容", THIRD_PARTY: "第三方", PUBLIC_DOMAIN: "公共领域" };
 const AUTH_LABELS: Array<[string, string]> = [
@@ -16,6 +22,15 @@ const AUTH_LABELS: Array<[string, string]> = [
   ["canUseForEvaluation", "可评测"],
   ["canShowPublicly", "可公开展示"],
 ];
+
+function visualGrammarState(value: unknown) {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return Object.fromEntries(
+    VISUAL_GRAMMAR_FIELDS.map((field) => [field.key, typeof record[field.key] === "string" ? record[field.key] : ""]),
+  ) as Record<string, string>;
+}
 
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -42,8 +57,12 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     if (!data?.versions?.[0] || form) return;
     const version = data.versions[0];
     setForm({
-      title: data.title, archetype: data.archetype, briefId: data.briefId ?? "",
+      title: data.title, briefId: data.briefId ?? "",
+      startPoints: Array.isArray(version.startPoints) ? version.startPoints : [],
+      intentTags: Array.isArray(version.intentTags) ? version.intentTags : [],
       applicableConditions: version.applicableConditions, designMechanism: version.designMechanism,
+      bodyMechanism: version.bodyMechanism ?? "", structureSignature: version.structureSignature ?? "",
+      visualGrammar: visualGrammarState(version.visualGrammar),
       mechanismTags: (version.mechanismTags ?? []).join("，"), antiPatterns: (version.antiPatterns ?? []).join("\n"),
       sourceType: version.sourceType, sourceNote: version.sourceNote, html: "", screenshotDataUrl: "",
     });
@@ -69,9 +88,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const screenshot = currentAssets.find((asset: any) => asset.kind === "SCREENSHOT_375");
   const htmlAsset = currentAssets.find((asset: any) => asset.kind === "HTML");
   const reviews = data.reviews ?? [];
+  const currentVisualGrammar = visualGrammarState(currentVersion?.visualGrammar);
 
   function set(key: string, value: any) { setForm((current: any) => ({ ...current, [key]: value })); }
   function setAuth(key: string, value: any) { setAuthorization((current: any) => ({ ...current, [key]: value })); }
+  function setVisual(key: string, value: string) {
+    setForm((current: any) => ({ ...current, visualGrammar: { ...current.visualGrammar, [key]: value } }));
+  }
+  function toggleList(key: "startPoints" | "intentTags", value: string) {
+    setForm((current: any) => {
+      const active = current[key].includes(value);
+      if (key === "startPoints" && !active && current[key].length >= 3) return current;
+      return {
+        ...current,
+        [key]: active ? current[key].filter((item: string) => item !== value) : [...current[key], value],
+      };
+    });
+  }
 
   async function reload(messageText?: string) {
     await caseQuery.reload();
@@ -86,9 +119,21 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   }
   async function saveVersion(event: React.FormEvent) {
     event.preventDefault();
+    if (!form.startPoints.length) {
+      setMessage({ ok: false, text: "请选择至少一个用户侧起稿起点。" });
+      return;
+    }
+    const metadataIssues = caseMetadataIssues(form);
+    if (metadataIssues.length) {
+      setMessage({ ok: false, text: metadataIssues.join("；") });
+      return;
+    }
     const payload: any = {
-      title: form.title, archetype: form.archetype, briefId: form.briefId || null,
+      title: form.title, briefId: form.briefId || null,
+      startPoints: form.startPoints, intentTags: form.intentTags,
       applicableConditions: form.applicableConditions, designMechanism: form.designMechanism,
+      bodyMechanism: form.bodyMechanism, structureSignature: form.structureSignature,
+      visualGrammar: form.visualGrammar,
       mechanismTags: form.mechanismTags.split(/[，,]/).map((value: string) => value.trim()).filter(Boolean),
       antiPatterns: form.antiPatterns.split("\n").map((value: string) => value.trim()).filter(Boolean),
       sourceType: form.sourceType, sourceNote: form.sourceNote,
@@ -116,7 +161,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   return <>
     <PageHeader
       title={data.title}
-      description={data.caseNo + " · 当前 v" + data.currentVersion + " · " + (ARCHETYPES.find((item) => item.code === data.archetype)?.label ?? data.archetype)}
+      description={data.caseNo + " · 当前 v" + data.currentVersion + " · " + (startPointLabels(currentVersion?.startPoints).join(" + ") || "待补起稿起点")}
       action={<><Link className="btn" href="/cases">返回案例库</Link><Badge value={data.status} /><span className="badge gray">{reviews.length} 条可见评审</span></>}
     />
     {message ? <div className={message.ok ? "success-box" : "error-box"} style={{ marginBottom: 14 }}>{message.text}</div> : null}
@@ -137,8 +182,13 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           <div className="card-head"><div><h2>案例卡</h2><div className="card-sub">左侧证据，右侧结构化字段。审批后修改会生成新版本并重新进入评审。</div></div><Badge value={data.status} /></div>
           <div className="detail-list">
             <div><dt>关联 Brief</dt><dd>{data.brief ? <Link className="mono" href={"/briefs/" + data.brief.id}>{data.brief.briefNo}</Link> : "未关联"}{data.brief?.split === "HOLDOUT" ? <span className="badge amber" style={{ marginLeft: 8 }}>HOLDOUT</span> : null}</dd></div>
+            <div><dt>起稿起点</dt><dd>{startPointLabels(currentVersion?.startPoints).join(" + ") || "待补"}</dd></div>
+            <div><dt>意图标签</dt><dd>{INTENT_TAGS.filter((tag) => (currentVersion?.intentTags ?? []).includes(tag.id)).map((tag) => tag.label).join(" · ") || "—"}</dd></div>
             <div><dt>适用内容条件</dt><dd>{currentVersion?.applicableConditions}</dd></div>
             <div><dt>设计机制</dt><dd>{currentVersion?.designMechanism}</dd></div>
+            <div><dt>正文承接</dt><dd>{currentVersion?.bodyMechanism || "待补"}</dd></div>
+            <div><dt>结构签名</dt><dd className="mono small">{currentVersion?.structureSignature || "—"}</dd></div>
+            <div><dt>视觉语法</dt><dd>{VISUAL_GRAMMAR_FIELDS.map((field) => <div key={field.key} style={{ marginBottom: 8 }}><strong>{field.label}：</strong>{currentVisualGrammar[field.key] || "待补"}</div>)}</dd></div>
             <div><dt>机制标签</dt><dd>{(currentVersion?.mechanismTags ?? []).join(" · ") || "—"}</dd></div>
             <div><dt>反模式</dt><dd>{(currentVersion?.antiPatterns ?? []).length ? (currentVersion?.antiPatterns ?? []).map((value: string) => <div key={value}>· {value}</div>) : "—"}</dd></div>
             <div><dt>来源</dt><dd>{SOURCE_LABELS[currentVersion?.sourceType] ?? currentVersion?.sourceType}<div className="small muted">{currentVersion?.sourceNote}</div></dd></div>
@@ -187,16 +237,33 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           {form ? <form className="grid" onSubmit={saveVersion}>
             <div className="form-grid">
               <div className="field full"><label>标题</label><input className="input" value={form.title} onChange={(event) => set("title", event.target.value)} required /></div>
-              <div className="field"><label>主型</label><select className="select" value={form.archetype} onChange={(event) => set("archetype", event.target.value)}>{ARCHETYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}</select></div>
+              <div className="field full">
+                <label>起稿起点（1–3 个）</label>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 6 }}>
+                  {START_POINTS.map((point) => <label key={point.id} style={{ display: "flex", gap: 7, alignItems: "flex-start", padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 7, background: form.startPoints.includes(point.id) ? "#f8e4da" : "#fffdf8" }}><input type="checkbox" checked={form.startPoints.includes(point.id)} onChange={() => toggleList("startPoints", point.id)} /><span><strong>{point.label}</strong><span className="small muted" style={{ display: "block" }}>{point.description}</span></span></label>)}
+                </div>
+              </div>
+              <div className="field full">
+                <label>意图标签（可选）</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>{INTENT_TAGS.map((tag) => <label key={tag.id} style={{ display: "flex", gap: 5, alignItems: "center", padding: "5px 9px", border: "1px solid var(--line)", borderRadius: 999, background: form.intentTags.includes(tag.id) ? "#f8e4da" : "#fffdf8" }}><input type="checkbox" checked={form.intentTags.includes(tag.id)} onChange={() => toggleList("intentTags", tag.id)} />{tag.label}</label>)}</div>
+              </div>
               <div className="field"><label>来源类型</label><select className="select" value={form.sourceType} onChange={(event) => set("sourceType", event.target.value)}>{Object.entries(SOURCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
               <div className="field full"><label>适用内容条件</label><textarea className="textarea" value={form.applicableConditions} onChange={(event) => set("applicableConditions", event.target.value)} required /></div>
               <div className="field full"><label>设计机制</label><textarea className="textarea" value={form.designMechanism} onChange={(event) => set("designMechanism", event.target.value)} required /></div>
+              <div className="field full"><label>正文承接机制</label><textarea className="textarea" value={form.bodyMechanism} onChange={(event) => set("bodyMechanism", event.target.value)} required /><span className="hint">首屏之后，章节如何继续兑现同一机制？不能只描述封面。</span></div>
+              <div className="field full"><label>结构签名</label><textarea className="textarea" value={form.structureSignature} onChange={(event) => set("structureSignature", event.target.value)} placeholder="例如：wide-image-entry > narrow-body > image-pause > human-action-close" required /></div>
               <div className="field"><label>机制标签</label><input className="input" value={form.mechanismTags} onChange={(event) => set("mechanismTags", event.target.value)} /></div>
               <div className="field"><label>来源说明</label><input className="input" value={form.sourceNote} onChange={(event) => set("sourceNote", event.target.value)} required /></div>
               <div className="field full"><label>反模式（每行一条）</label><textarea className="textarea" value={form.antiPatterns} onChange={(event) => set("antiPatterns", event.target.value)} /></div>
               <div className="field full"><label>替换 HTML（留空则沿用当前证据）</label><textarea className="textarea mono" value={form.html} onChange={(event) => set("html", event.target.value)} /></div>
               <div className="field full"><label>替换 375px 截图（留空则沿用）</label><input className="input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (file) set("screenshotDataUrl", await fileToDataUrl(file)); }} /></div>
             </div>
+            <section style={{ marginTop: 22 }}>
+              <div className="card-head"><div><h3>七项视觉语法</h3><div className="card-sub">记录可迁移到别的内容上的设计规则；训练导出会阻断缺失或占位文本。</div></div></div>
+              <div className="form-grid" style={{ marginTop: 12 }}>
+                {VISUAL_GRAMMAR_FIELDS.map((field) => <div className="field full" key={field.key}><label>{field.label}</label><textarea className="textarea" value={form.visualGrammar[field.key]} onChange={(event) => setVisual(field.key, event.target.value)} required /><span className="hint">{field.hint}</span></div>)}
+              </div>
+            </section>
             <button className="btn primary" disabled={busy}>保存为新版本</button>
           </form> : null}
         </section> : null}

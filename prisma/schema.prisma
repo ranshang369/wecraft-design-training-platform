@@ -442,6 +442,11 @@ model CaseVersion {
   version              Int
   applicableConditions String
   designMechanism      String
+  bodyMechanism        String?
+  startPoints          Json     @default("[]")
+  intentTags           Json     @default("[]")
+  structureSignature   String?
+  visualGrammar        Json?
   antiPatterns         Json     @default("[]")
   mechanismTags        Json     @default("[]")
   selfScores           Json

@@ -118,7 +118,32 @@ async function main() {
     cases[c.id] = item.id;
     const screenshot = await seedFile(W, annotator, c.no + "-375.svg", "image/svg+xml", screenshotSvg(c.title, c.accent), "CASE_SCREENSHOT");
     const html = await seedFile(W, annotator, c.no + ".html", "text/html", htmlDoc(c.title, c.accent, "这篇内容把材料、折痕与阅读时间组织成同一种视觉语法。"), "CASE_HTML");
-    const version = await prisma.caseVersion.create({ data: { caseId: item.id, version: 1, applicableConditions: "适合有明确材料隐喻、标题需要承担叙事重量的长文。", designMechanism: "让材料痕迹成为段落分隔和标题层次，避免把机制当作装饰。", antiPatterns: ["不要把折痕做成无意义的背景纹理", "不要牺牲正文可读性"], mechanismTags: ["材料同构", "段落折叠", "标题层级"], selfScores: { CONTENT_FIT: 4, VISUAL_MECHANISM: 5, TYPE_HIERARCHY: 4, IMAGE_NARRATIVE: 4, RHYTHM: 4, COMPLETION: 4 }, sourceType: "INTERNAL_ORIGINAL", sourceNote: "非敏感演示样例，由内部设计训练组制作", contentHash: hash(c.title + c.no), createdBy: annotator } });
+    const version = await prisma.caseVersion.create({ data: {
+      caseId: item.id,
+      version: 1,
+      applicableConditions: "适合有明确材料隐喻、标题需要承担叙事重量的长文。",
+      designMechanism: "让材料痕迹成为段落分隔和标题层次，避免把机制当作装饰。",
+      bodyMechanism: "首屏用色条、超大标题与分隔线建立秩序，后文继续以同一分隔线、单色几何块和等宽尾注组织停顿，不新增另一套装饰语法。",
+      startPoints: ["perspective"],
+      intentTags: ["restrained", "editorial"],
+      structureSignature: "accent-strip > oversized-serif-title > rule > geometric-pause > body-close",
+      visualGrammar: {
+        surfaceMaterial: "暖白平涂纸面，顶部色条作为装订边或材料切口，正文区域保持干净，不让纹理穿过文字。",
+        typeSystem: "大号衬线标题承担展示层，无衬线正文承担阅读层，疏排等宽小字只用于刊头和尾注。",
+        imageTreatment: "没有真实摄影；单色几何块和细线圆环承担图像位，作为章节停顿而不是信息图。",
+        composition: "首屏为通栏色条、标题和分隔线，中段用近满宽几何块打断长文，结尾回到窄栏正文与尾注。",
+        colorLight: "纸色与墨色维持高对比，案例色只用于顶部条、几何块和圆环，面积受控。",
+        decorationAnnotations: "细分隔线定义阅读节奏，刊头微字提供出处，圆环只出现一次作为视觉停顿。",
+        firstScreenAction: "首屏先落下一条通栏色条，再让超大标题压住正文基线，以分隔线把标题和导语切成两个时间层。",
+      },
+      antiPatterns: ["不要把折痕做成无意义的背景纹理", "不要牺牲正文可读性"],
+      mechanismTags: ["材料同构", "段落折叠", "标题层级"],
+      selfScores: { CONTENT_FIT: 4, VISUAL_MECHANISM: 5, TYPE_HIERARCHY: 4, IMAGE_NARRATIVE: 4, RHYTHM: 4, COMPLETION: 4 },
+      sourceType: "INTERNAL_ORIGINAL",
+      sourceNote: "非敏感演示样例，由内部设计训练组制作",
+      contentHash: hash(c.title + c.no),
+      createdBy: annotator,
+    } });
     await prisma.caseAsset.create({ data: { caseId: item.id, caseVersionId: version.id, storedFileId: screenshot.id, kind: AssetKind.SCREENSHOT_375, sortOrder: 0, isPrimary: true, width: 375, height: 600, altText: c.title + " 的 375px 截图" } });
     await prisma.caseAsset.create({ data: { caseId: item.id, caseVersionId: version.id, storedFileId: html.id, kind: AssetKind.HTML, sortOrder: 1, width: 375, height: 600, altText: c.title + " 的 HTML 证据" } });
     await prisma.authorizationGrant.create({ data: { workspaceId: W, subjectType: AuthSubjectType.CASE, subjectId: item.id, canDeriveMechanism: true, canUseForGeneration: c.auth.canUseForTraining, canUseForDisplay: true, canUseForTraining: c.auth.canUseForTraining, canUseForEvaluation: c.auth.canUseForEvaluation, canShowPublicly: false, evidenceStatus: EvidenceStatus.VERIFIED, evidenceNote: "演示样例授权：内部原创，已核验", updatedBy: owner } });

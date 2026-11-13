@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { expect, test } from "@playwright/test";
-import { expectStatus, IDS, newSession, readJson, SAFE_HTML, SCREENSHOT_DATA_URL, scores } from "./helpers";
+import { CASE_METADATA, expectStatus, IDS, newSession, readJson, SAFE_HTML, SCREENSHOT_DATA_URL, scores } from "./helpers";
 import { hashObject } from "../../src/lib/hash";
 
 const prisma = new PrismaClient();
@@ -110,8 +110,9 @@ test("Holdout：普通角色无法通过 ID 读取数据集或截图文件", asy
     expectStatus(await owner.get("/api/v1/briefs/" + IDS.holdoutBrief), 200);
 
     const holdoutCase = await owner.post("/api/v1/cases", { data: {
-      title: "E2E Holdout 案例 " + Date.now(), archetype: "SCENE", briefId: IDS.holdoutBrief,
+      title: "E2E Holdout 案例 " + Date.now(), briefId: IDS.holdoutBrief,
       applicableConditions: "仅用于保留集评测。", designMechanism: "以夜景分层建立阅读路径。",
+      ...CASE_METADATA,
       antiPatterns: [], mechanismTags: ["场景分层"], selfScores: scores(4), sourceType: "INTERNAL_ORIGINAL",
       sourceNote: "E2E 非敏感 Holdout 样例", html: SAFE_HTML, screenshotDataUrl: SCREENSHOT_DATA_URL,
     }});

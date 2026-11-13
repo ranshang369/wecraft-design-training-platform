@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { blindBody, IDS, newSession, readJson, reviewBody, SAFE_HTML, SCREENSHOT_DATA_URL, expectStatus } from "./helpers";
+import { blindBody, CASE_METADATA, IDS, newSession, readJson, reviewBody, SAFE_HTML, SCREENSHOT_DATA_URL, expectStatus } from "./helpers";
 
 test("流程 A：案例创建、双评、分歧裁决与入库", async () => {
   const annotator = await newSession("annotator@example.test");
@@ -10,9 +10,10 @@ test("流程 A：案例创建、双评、分歧裁决与入库", async () => {
   try {
     const title = "E2E 流程 A 案例 " + Date.now();
     const created = await annotator.post("/api/v1/cases", { data: {
-      title, archetype: "MATERIAL", briefId: null,
+      title, briefId: null,
       applicableConditions: "适合材料隐喻清楚、正文较长的内容。",
       designMechanism: "用折页结构建立标题与段落层级，同时保留阅读效率。",
+      ...CASE_METADATA,
       antiPatterns: ["避免纯装饰折痕"], mechanismTags: ["材料同构", "折页"],
       selfScores: { CONTENT_FIT: 4, VISUAL_MECHANISM: 4, TYPE_HIERARCHY: 4, IMAGE_NARRATIVE: 4, RHYTHM: 4, COMPLETION: 4 },
       sourceType: "INTERNAL_ORIGINAL", sourceNote: "E2E 非敏感样例",

@@ -4,6 +4,8 @@ import { prisma } from "./db";
 import { hashObject, sha256 } from "./hash";
 import { readStoredFile, saveFile } from "./storage";
 import { ApiError } from "./api";
+import { aggregateReviewEvidence } from "./review-aggregation";
+import { structureSignatureIssues, visualGrammarIssues } from "./case-metadata";
 
 type Blocker = { itemId: string; code: string; message: string };
 type ValidationOptions = { persist?: boolean; enforceSnapshot?: boolean };
@@ -82,7 +84,10 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
       if (item.itemType === "CASE" && item.caseId) {
         const value = await prisma.case.findFirst({
           where: { id: item.caseId, workspaceId: dataset.workspaceId, deletedAt: null },
-          include: { versions: { orderBy: { version: "desc" }, take: 1 }, reviews: { where: { status: "SUBMITTED" } } },
+          include: {
+            versions: { orderBy: { version: "desc" }, take: 1 },
+            reviews: { where: { status: "SUBMITTED" }, include: { scores: true } },
+          },
         });
         if (!value) throw new ApiError(422, "DATASET_BLOCKED", "案例不存在或不在当前 Workspace");
         const version = value.versions[0];
@@ -90,10 +95,21 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
         const currentRights = grantSnapshot(grant);
         itemRights = currentRights;
         const currentReviews = value.reviews.filter((review) => review.caseVersionId === version?.id);
+        const reviewEvidence = aggregateReviewEvidence(currentReviews);
         if (!version) itemBlockers.push({ itemId: item.id, code: "MISSING_VERSION", message: value.caseNo + " 缺少版本" });
         if (value.status !== "ELIGIBLE") itemBlockers.push({ itemId: item.id, code: "NOT_ELIGIBLE", message: value.caseNo + " 尚未进入 ELIGIBLE" });
         if (!grant || !requiredGrant(dataset.type, grant)) itemBlockers.push({ itemId: item.id, code: "RIGHTS_MISSING", message: value.caseNo + " 缺少" + (dataset.type === "TRAIN" ? "训练" : "评测") + "授权" });
-        if (new Set(currentReviews.map((review) => review.reviewerId)).size < 2) itemBlockers.push({ itemId: item.id, code: "REVIEW_INCOMPLETE", message: value.caseNo + " 未完成两名评审" });
+        if (reviewEvidence.reviewers < 2) itemBlockers.push({ itemId: item.id, code: "REVIEW_INCOMPLETE", message: value.caseNo + " 未完成两名独立评审" });
+        if (reviewEvidence.reviewers >= 2 && !reviewEvidence.publishable) itemBlockers.push({ itemId: item.id, code: "REVIEW_NOT_PUBLISHABLE", message: value.caseNo + " 仍有一名评审未给出 PUBLISHABLE" });
+        if (reviewEvidence.reviewers >= 2 && !reviewEvidence.scoresComplete) itemBlockers.push({ itemId: item.id, code: "REVIEW_SCORES_INCOMPLETE", message: value.caseNo + " 的双评六维分数不完整" });
+        if (reviewEvidence.reviewers >= 2 && reviewEvidence.scoresComplete && !reviewEvidence.qualityFloorMet) itemBlockers.push({ itemId: item.id, code: "REVIEW_QUALITY_LOW", message: value.caseNo + " 的双评中位分未达到训练样例门槛" });
+        const startPoints = Array.isArray(version?.startPoints) ? version.startPoints : [];
+        if (!startPoints.length) itemBlockers.push({ itemId: item.id, code: "START_POINT_MISSING", message: value.caseNo + " 缺少用户侧起稿起点" });
+        if (!version?.bodyMechanism?.trim()) itemBlockers.push({ itemId: item.id, code: "BODY_MECHANISM_MISSING", message: value.caseNo + " 缺少正文承接机制" });
+        const structureIssues = structureSignatureIssues(version?.structureSignature);
+        if (structureIssues.length) itemBlockers.push({ itemId: item.id, code: "STRUCTURE_SIGNATURE_MISSING", message: value.caseNo + " 的结构签名不可比较：" + structureIssues.join("；") });
+        const visualIssues = visualGrammarIssues(version?.visualGrammar);
+        if (visualIssues.length) itemBlockers.push({ itemId: item.id, code: "VISUAL_GRAMMAR_MISSING", message: value.caseNo + " 的视觉语法不完整：" + visualIssues.join("；") });
         if (enforceSnapshot && version && item.snapshot && typeof item.snapshot === "object") {
           const frozen = item.snapshot as Record<string, unknown>;
           if (frozen.caseVersionId !== version.id) itemBlockers.push({ itemId: item.id, code: "VERSION_DRIFT", message: value.caseNo + " 在批准后产生了新版本，请重新校验并批准" });
@@ -103,12 +119,15 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
           itemType: "CASE", caseId: value.id, caseNo: value.caseNo, title: value.title, archetype: value.archetype,
           status: value.status, caseVersionId: version?.id, version: version?.version, contentHash: version?.contentHash,
           applicableConditions: version?.applicableConditions, designMechanism: version?.designMechanism,
+          bodyMechanism: version?.bodyMechanism, startPoints: version?.startPoints ?? [], intentTags: version?.intentTags ?? [],
+          structureSignature: version?.structureSignature, visualGrammar: version?.visualGrammar,
           antiPatterns: version?.antiPatterns, mechanismTags: version?.mechanismTags, selfScores: version?.selfScores,
           sourceType: version?.sourceType, sourceNote: version?.sourceNote,
           reviewSummary: {
-            reviewers: new Set(currentReviews.map((review) => review.reviewerId)).size,
-            recommendations: currentReviews.map((review) => review.recommendation),
+            reviewers: reviewEvidence.reviewers,
+            recommendations: reviewEvidence.recommendations,
           },
+          reviewScores: reviewEvidence.scores,
           rights: currentRights,
         };
       } else if (item.itemType === "COUNTEREXAMPLE" && item.counterexampleId) {
@@ -252,7 +271,7 @@ export async function createExport(datasetId: string, actorId: string) {
     { path: "counterexamples.jsonl", text: records.counterexamples.map((row) => JSON.stringify(row)).join("\n") + (records.counterexamples.length ? "\n" : "") },
     { path: "candidates.jsonl", text: records.candidates.map((row) => JSON.stringify(row)).join("\n") + (records.candidates.length ? "\n" : "") },
     { path: "briefs.csv", text: toCsv(records.briefs, ["briefNo","title","split","purpose","version","contentHash","manuscriptMarkdown","targetAudience","designCommission","brandRequirements","prohibitedItems"]) },
-    { path: "cases.csv", text: toCsv(records.cases, ["caseNo","title","archetype","version","contentHash","applicableConditions","designMechanism","mechanismTags","antiPatterns","selfScores"]) },
+    { path: "cases.csv", text: toCsv(records.cases, ["caseNo","title","archetype","version","contentHash","applicableConditions","designMechanism","bodyMechanism","startPoints","intentTags","structureSignature","visualGrammar","mechanismTags","antiPatterns","selfScores","reviewSummary","reviewScores"]) },
     { path: "counterexamples.csv", text: toCsv(records.counterexamples, ["counterexampleNo","title","archetype","version","contentHash","failureSummary","failureLabels","reproductionSteps","repairSuggestion"]) },
     { path: "candidates.csv", text: toCsv(records.candidates, ["candidateNo","title","status","version","contentHash","modelProvider","modelName","modelVersion"]) },
   ];
@@ -264,7 +283,7 @@ export async function createExport(datasetId: string, actorId: string) {
 
   const contentHash = hashObject({ records, rights: dataset.rightsSnapshot, eligibility: dataset.eligibilitySnapshot });
   const manifest = {
-    dataset_id: dataset.id, dataset_no: dataset.datasetNo, version: dataset.version, schema_version: "1.0",
+    dataset_id: dataset.id, dataset_no: dataset.datasetNo, version: dataset.version, schema_version: "1.1",
     created_at: new Date().toISOString(), created_by: actorId, type: dataset.type,
     rights_snapshot: dataset.rightsSnapshot, item_count: dataset.itemCount, content_hash: contentHash,
     files,

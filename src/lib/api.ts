@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
 
-export const MAX_JSON_BODY_BYTES = 10 * 1024 * 1024;
+export const MAX_JSON_BODY_BYTES = 16 * 1024 * 1024;
 
 export class ApiError extends Error {
   status: number;
@@ -34,7 +34,7 @@ export function errorResponse(error: unknown) {
 async function readJsonText(request: Request): Promise<string> {
   const declaredLength = request.headers.get("content-length");
   if (declaredLength && (!/^\d+$/.test(declaredLength) || Number(declaredLength) > MAX_JSON_BODY_BYTES)) {
-    throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 10MB 上限");
+    throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 16MB 上限");
   }
   if (!request.body) return "";
   const reader = request.body.getReader();
@@ -47,7 +47,7 @@ async function readJsonText(request: Request): Promise<string> {
       total += value.byteLength;
       if (total > MAX_JSON_BODY_BYTES) {
         await reader.cancel().catch(() => undefined);
-        throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 10MB 上限");
+        throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 16MB 上限");
       }
       chunks.push(Buffer.from(value));
     }

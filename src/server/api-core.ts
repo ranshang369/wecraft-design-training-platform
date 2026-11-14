@@ -11,7 +11,7 @@ import { randomToken, hashObject, sha256 } from "@/lib/hash";
 import { saveFile } from "@/lib/storage";
 import { notify } from "@/lib/notifications";
 import { DIMENSION_CODES, DIMENSIONS } from "@/lib/constants";
-import { parseScreenshotDataUrl } from "@/lib/image";
+import { imageExtension, prepareScreenshotDataUrl, screenshotAltText } from "@/lib/image";
 import { aggregateReviewEvidence } from "@/lib/review-aggregation";
 import { experimentReviewerCount } from "@/lib/experiment-protocol";
 import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from "@/lib/login-guard";
@@ -285,20 +285,22 @@ export async function handleCore(request: Request, segments: string[], method: s
     fullScores(input.selfScores);
     const metadata = caseMetadataReview(input);
     if (metadata.errors.length) throw new ApiError(422, "VALIDATION_ERROR", metadata.errors.join("；"));
-    const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
+    const screenshot = await prepareScreenshotDataUrl(input.screenshotDataUrl);
     const created = await prisma.$transaction(async (tx) => {
       const archetype = input.archetype ?? inferInternalArchetype(input.startPoints);
       const caseValue = await tx.case.create({ data: { workspaceId: ctx.workspaceId, caseNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CA"), title: input.title, archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
       const version = await tx.caseVersion.create({ data: { caseId: caseValue.id, version: 1, applicableConditions: input.applicableConditions, designMechanism: input.designMechanism, bodyMechanism: input.bodyMechanism, startPoints: input.startPoints, intentTags: input.intentTags, structureSignature: input.structureSignature, visualGrammar: input.visualGrammar, antiPatterns: input.antiPatterns, mechanismTags: input.mechanismTags, selfScores: input.selfScores, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
-      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes });
+      const sourceScreenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-original." + imageExtension(screenshot.source.mimeType), mimeType: screenshot.source.mimeType, purpose: "CASE_SCREENSHOT_SOURCE", bytes: screenshot.source.bytes });
+      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-" + screenshot.normalized.width + "." + imageExtension(screenshot.normalized.mimeType), mimeType: screenshot.normalized.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.normalized.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) });
-      await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: screenshot.width, height: screenshot.height, isPrimary: true } });
+      await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: sourceScreenshotFile.id, kind: "SOURCE", width: screenshot.source.width, height: screenshot.source.height, sortOrder: 0, altText: screenshotAltText("原始截图", screenshot.source) } });
+      await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: screenshot.normalized.width, height: screenshot.normalized.height, sortOrder: 1, isPrimary: true, altText: screenshotAltText("自动适配", screenshot.normalized) } });
       await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: htmlFile.id, kind: "HTML" } });
       await tx.authorizationGrant.create({ data: { workspaceId: ctx.workspaceId, subjectType: "CASE", subjectId: caseValue.id, updatedBy: ctx.userId } });
-      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_CREATED", resourceType: "CASE", resourceId: caseValue.id, after: { title: input.title, archetype: input.archetype }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_CREATED", resourceType: "CASE", resourceId: caseValue.id, after: { title: input.title, archetype: input.archetype, imageProcessing: screenshot.transform }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return caseValue;
     });
-    return json({ ...created, warnings: metadata.warnings }, 201);
+    return json({ ...created, warnings: metadata.warnings, imageProcessing: screenshot.transform }, 201);
   }
   const caseMatch = path.match(/^cases\/([^/]+)(?:\/(submit|assign|approve|authorization|versions|resolve))?$/);
   if (caseMatch) {
@@ -323,9 +325,10 @@ export async function handleCore(request: Request, segments: string[], method: s
       const currentAssets = caseValue.assets.filter((asset) => asset.caseVersionId === current.id);
       const htmlAsset = currentAssets.find((asset) => asset.kind === "HTML");
       const screenshotAsset = currentAssets.find((asset) => asset.kind === "SCREENSHOT_375");
+      const sourceScreenshotAsset = currentAssets.find((asset) => asset.kind === "SOURCE");
       if (!input.screenshotDataUrl && !screenshotAsset) throw new ApiError(400, "VALIDATION_ERROR", "案例必须保留 375px 截图");
       if (!input.html && !htmlAsset) throw new ApiError(400, "VALIDATION_ERROR", "案例必须保留 HTML 证据");
-      const screenshot = input.screenshotDataUrl ? parseScreenshotDataUrl(input.screenshotDataUrl) : null;
+      const screenshot = input.screenshotDataUrl ? await prepareScreenshotDataUrl(input.screenshotDataUrl) : null;
       const versionNo = caseValue.currentVersion + 1;
       const merged = {
         applicableConditions: input.applicableConditions ?? current.applicableConditions,
@@ -343,20 +346,23 @@ export async function handleCore(request: Request, segments: string[], method: s
       };
       const metadata = caseMetadataReview(merged);
       if (metadata.errors.length) throw new ApiError(422, "VALIDATION_ERROR", metadata.errors.join("；"));
-      const screenshotFile = screenshot ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes }) : null;
+      const sourceScreenshotFile = screenshot ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + "-original." + imageExtension(screenshot.source.mimeType), mimeType: screenshot.source.mimeType, purpose: "CASE_SCREENSHOT_SOURCE", bytes: screenshot.source.bytes }) : null;
+      const screenshotFile = screenshot ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + "-" + screenshot.normalized.width + "." + imageExtension(screenshot.normalized.mimeType), mimeType: screenshot.normalized.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.normalized.bytes }) : null;
       const htmlFile = input.html ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) }) : null;
       const result = await prisma.$transaction(async (tx) => {
         const version = await tx.caseVersion.create({ data: { caseId: caseValue.id, version: versionNo, ...merged, contentHash: hashObject({ ...merged, previousHash: current.contentHash, htmlChanged: Boolean(input.html) }), createdBy: ctx.userId } });
         const screenshotFileId = screenshotFile?.id ?? screenshotAsset?.storedFileId;
-        if (screenshotFileId) await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFileId, kind: "SCREENSHOT_375", width: screenshot?.width ?? screenshotAsset?.width ?? 375, height: screenshot?.height ?? screenshotAsset?.height ?? 600, isPrimary: true } });
+        if (screenshotFileId) await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: screenshotFileId, kind: "SCREENSHOT_375", width: screenshot?.normalized.width ?? screenshotAsset?.width ?? 375, height: screenshot?.normalized.height ?? screenshotAsset?.height ?? 600, sortOrder: 1, isPrimary: true, altText: screenshot ? screenshotAltText("自动适配", screenshot.normalized) : screenshotAsset?.altText } });
+        const sourceFileId = sourceScreenshotFile?.id ?? sourceScreenshotAsset?.storedFileId;
+        if (sourceFileId) await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: sourceFileId, kind: "SOURCE", width: screenshot?.source.width ?? sourceScreenshotAsset?.width, height: screenshot?.source.height ?? sourceScreenshotAsset?.height, sortOrder: 0, altText: screenshot ? screenshotAltText("原始截图", screenshot.source) : sourceScreenshotAsset?.altText } });
         await tx.caseAsset.create({ data: { caseId: caseValue.id, caseVersionId: version.id, storedFileId: htmlFile?.id ?? htmlAsset!.storedFileId, kind: "HTML" } });
         const nextArchetype = input.archetype
           ?? (input.startPoints ? inferInternalArchetype(input.startPoints) : caseValue.archetype);
         const updated = await tx.case.update({ where: { id: caseValue.id }, data: { title: input.title ?? caseValue.title, archetype: nextArchetype, briefId: input.briefId === undefined ? caseValue.briefId : input.briefId, currentVersion: versionNo, status: "SUBMITTED", approvedBy: null, approvedAt: null, rowVersion: { increment: 1 } } });
-        await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_VERSION_CREATED", resourceType: "CASE", resourceId: caseValue.id, before: { currentVersion: caseValue.currentVersion }, after: { currentVersion: versionNo }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+        await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_VERSION_CREATED", resourceType: "CASE", resourceId: caseValue.id, before: { currentVersion: caseValue.currentVersion }, after: { currentVersion: versionNo, imageProcessing: screenshot?.transform }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
         return { ...updated, version };
       });
-      return json({ ...result, warnings: metadata.warnings }, 201);
+      return json({ ...result, warnings: metadata.warnings, imageProcessing: screenshot?.transform }, 201);
     }
     if (method === "POST" && caseMatch[2] === "submit") {
       assertCapability(can.editCases(ctx.roles));
@@ -423,16 +429,18 @@ export async function handleCore(request: Request, segments: string[], method: s
     assertCapability(can.editCounterexamples(ctx.roles));
     const input = await body(request, counterCreateSchema);
     await assertBriefReference(ctx, input.briefId);
-    const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
+    const screenshot = await prepareScreenshotDataUrl(input.screenshotDataUrl);
     const created = await prisma.$transaction(async (tx) => {
       const item = await tx.counterexample.create({ data: { workspaceId: ctx.workspaceId, counterexampleNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CE"), title: input.title, archetype: input.archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
       const version = await tx.counterexampleVersion.create({ data: { counterexampleId: item.id, version: 1, failureSummary: input.failureSummary, failureLabels: input.failureLabels, reproductionSteps: input.reproductionSteps, rootCause: input.rootCause, repairSuggestion: input.repairSuggestion, applicableConditions: input.applicableConditions, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
-      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + "-375.png", mimeType: screenshot.mimeType, purpose: "COUNTEREXAMPLE_SCREENSHOT", bytes: screenshot.bytes });
+      const sourceScreenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + "-original." + imageExtension(screenshot.source.mimeType), mimeType: screenshot.source.mimeType, purpose: "COUNTEREXAMPLE_SCREENSHOT_SOURCE", bytes: screenshot.source.bytes });
+      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + "-" + screenshot.normalized.width + "." + imageExtension(screenshot.normalized.mimeType), mimeType: screenshot.normalized.mimeType, purpose: "COUNTEREXAMPLE_SCREENSHOT", bytes: screenshot.normalized.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + ".html", mimeType: "text/html", purpose: "COUNTEREXAMPLE_HTML", bytes: Buffer.from(input.html) });
-      await tx.counterexampleAsset.create({ data: { counterexampleId: item.id, counterexampleVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: 375 } });
+      await tx.counterexampleAsset.create({ data: { counterexampleId: item.id, counterexampleVersionId: version.id, storedFileId: sourceScreenshotFile.id, kind: "SOURCE", width: screenshot.source.width, height: screenshot.source.height, sortOrder: 0, altText: screenshotAltText("原始截图", screenshot.source) } });
+      await tx.counterexampleAsset.create({ data: { counterexampleId: item.id, counterexampleVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: screenshot.normalized.width, height: screenshot.normalized.height, sortOrder: 1, altText: screenshotAltText("自动适配", screenshot.normalized) } });
       await tx.counterexampleAsset.create({ data: { counterexampleId: item.id, counterexampleVersionId: version.id, storedFileId: htmlFile.id, kind: "HTML" } });
       await tx.authorizationGrant.create({ data: { workspaceId: ctx.workspaceId, subjectType: "COUNTEREXAMPLE", subjectId: item.id, updatedBy: ctx.userId } });
-      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "COUNTEREXAMPLE_CREATED", resourceType: "COUNTEREXAMPLE", resourceId: item.id, after: input, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "COUNTEREXAMPLE_CREATED", resourceType: "COUNTEREXAMPLE", resourceId: item.id, after: { ...input, screenshotDataUrl: undefined, imageProcessing: screenshot.transform }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return item;
     });
     return json(created, 201);

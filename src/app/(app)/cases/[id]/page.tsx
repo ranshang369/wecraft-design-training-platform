@@ -5,6 +5,7 @@ import { api, useApi, formatDate } from "@/lib/client";
 import { PageHeader, Badge, Empty } from "@/components/ui";
 import { HtmlPreview } from "@/components/html-preview";
 import { ScoreTable } from "@/components/scoring";
+import { readScreenshotFile, SCREENSHOT_ACCEPT, type ClientScreenshot } from "@/lib/client-image";
 import {
   INTENT_TAGS,
   START_POINTS,
@@ -44,6 +45,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [busy, setBusy] = useState(false);
   const [resolveOutcome, setResolveOutcome] = useState("ELIGIBLE");
   const [resolveReason, setResolveReason] = useState("");
+  const [pendingScreenshot, setPendingScreenshot] = useState<ClientScreenshot | null>(null);
 
   useEffect(() => {
     const saved = window.sessionStorage.getItem("wecraft-case-warnings");
@@ -100,6 +102,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const currentVersion = data.versions?.[0];
   const currentAssets = (data.assets ?? []).filter((asset: any) => asset.caseVersionId === currentVersion?.id);
   const screenshot = currentAssets.find((asset: any) => asset.kind === "SCREENSHOT_375");
+  const sourceScreenshot = currentAssets.find((asset: any) => asset.kind === "SOURCE");
   const htmlAsset = currentAssets.find((asset: any) => asset.kind === "HTML");
   const reviews = data.reviews ?? [];
   const currentVisualGrammar = visualGrammarState(currentVersion?.visualGrammar);
@@ -175,10 +178,6 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   async function assign() {
     await run(() => api("/cases/" + id + "/assign", { method: "POST", body: JSON.stringify({ reviewerIds }) }), "已分配两名独立评审。");
   }
-  async function fileToDataUrl(file: File) {
-    return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); });
-  }
-
   return <>
     <PageHeader
       title={data.title}
@@ -189,8 +188,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
     <div className="split-view">
       <div className="grid preview-sticky">
         <section className="card">
-          <div className="card-head"><h2>375px 截图</h2><span className="small muted">{screenshot?.width ?? 375} × {screenshot?.height ?? "—"}</span></div>
+          <div className="card-head"><h2>适配截图</h2><span className="small muted">{screenshot?.width ?? 375} × {screenshot?.height ?? "—"}</span></div>
           {screenshot ? <img className="preview-image" src={"/api/v1/files/" + screenshot.storedFileId + "/content"} alt={screenshot.altText ?? data.title + " 截图"} /> : <div className="empty" style={{ minHeight: 300 }}>当前版本缺少截图</div>}
+          <div className="small muted" style={{ marginTop: 8 }}>{screenshot?.altText ?? "等待上传截图"}{sourceScreenshot ? <> · 原图 {sourceScreenshot.width}×{sourceScreenshot.height}px · <a href={"/api/v1/files/" + sourceScreenshot.storedFileId + "/content"} target="_blank" rel="noreferrer">查看原图</a></> : null}</div>
         </section>
         <section className="card">
           <div className="card-head"><h2>HTML 证据</h2><span className="badge green">沙箱预览</span></div>
@@ -277,7 +277,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
               <div className="field"><label>来源说明</label><input className="input" value={form.sourceNote} onChange={(event) => set("sourceNote", event.target.value)} required /></div>
               <div className="field full"><label>反模式（每行一条）</label><textarea className="textarea" value={form.antiPatterns} onChange={(event) => set("antiPatterns", event.target.value)} /></div>
               <div className="field full"><label>替换 HTML（留空则沿用当前证据）</label><textarea className="textarea mono" value={form.html} onChange={(event) => set("html", event.target.value)} /></div>
-              <div className="field full"><label>替换 375px 截图（留空则沿用）</label><input className="input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (file) set("screenshotDataUrl", await fileToDataUrl(file)); }} /></div>
+              <div className="field full"><label>替换原始截图（留空则沿用）</label><input className="input" type="file" accept={SCREENSHOT_ACCEPT} onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const next = await readScreenshotFile(file); setPendingScreenshot(next); set("screenshotDataUrl", next.dataUrl); } catch (uploadError) { setPendingScreenshot(null); set("screenshotDataUrl", ""); setMessage({ ok: false, text: uploadError instanceof Error ? uploadError.message : "无法读取截图" }); } }} /><span className="hint">{pendingScreenshot ? "已识别 " + pendingScreenshot.width + "×" + pendingScreenshot.height + "px；保存时自动裁边、纠正方向并适配为 375/750px，原图保留。" : "平台会自动识别尺寸；无需预先裁成 375px。"}</span></div>
             </div>
             <section style={{ marginTop: 22 }}>
               <div className="card-head"><div><h3>七项视觉语法</h3><div className="card-sub">记录可迁移到别的内容上的设计规则；训练导出会阻断缺失或占位文本。</div></div></div>

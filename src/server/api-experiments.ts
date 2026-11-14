@@ -8,7 +8,7 @@ import { saveFile } from "@/lib/storage";
 import { executeHardCheckRun } from "@/lib/hard-check";
 import { DIMENSION_CODES } from "@/lib/constants";
 import { Prisma, type Candidate, type CandidateVersion } from "@prisma/client";
-import { parseScreenshotDataUrl } from "@/lib/image";
+import { imageExtension, prepareScreenshotDataUrl } from "@/lib/image";
 import {
   assertIndependentExperimentParticipants,
   blindPolicySnapshot,
@@ -118,18 +118,20 @@ export async function handleExperiments(request: Request, segments: string[], me
     const input = await body(request, candidateSchema);
     const brief = await prisma.brief.findFirst({ where: { id: input.briefId, workspaceId: ctx.workspaceId, deletedAt: null }, select: { split: true } });
     if (!brief || (brief.split === "HOLDOUT" && !isHoldoutAdmin(ctx))) throw new ApiError(404, "NOT_FOUND", "Brief 不存在");
-    const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
+    const screenshot = await prepareScreenshotDataUrl(input.screenshotDataUrl);
     const created = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.create({ data: { workspaceId: ctx.workspaceId, candidateNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CD"), title: input.title, briefId: input.briefId, experimentId: input.experimentId || null, createdBy: ctx.userId, status: "SUBMITTED", submittedAt: new Date() } });
       const version = await tx.candidateVersion.create({ data: { candidateId: candidate.id, version: 1, html: input.html, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion, contentHash: hashObject({ html: input.html, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion }), createdBy: ctx.userId } });
-      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CANDIDATE_SCREENSHOT", bytes: screenshot.bytes });
+      const sourceScreenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + "-original." + imageExtension(screenshot.source.mimeType), mimeType: screenshot.source.mimeType, purpose: "CANDIDATE_SCREENSHOT_SOURCE", bytes: screenshot.source.bytes });
+      const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + "-" + screenshot.normalized.width + "." + imageExtension(screenshot.normalized.mimeType), mimeType: screenshot.normalized.mimeType, purpose: "CANDIDATE_SCREENSHOT", bytes: screenshot.normalized.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + ".html", mimeType: "text/html", purpose: "CANDIDATE_HTML", bytes: Buffer.from(input.html) });
-      await tx.candidateAsset.create({ data: { candidateId: candidate.id, candidateVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: 375 } });
+      await tx.candidateAsset.create({ data: { candidateId: candidate.id, candidateVersionId: version.id, storedFileId: sourceScreenshotFile.id, kind: "SOURCE", width: screenshot.source.width, height: screenshot.source.height, sortOrder: 0 } });
+      await tx.candidateAsset.create({ data: { candidateId: candidate.id, candidateVersionId: version.id, storedFileId: screenshotFile.id, kind: "SCREENSHOT_375", width: screenshot.normalized.width, height: screenshot.normalized.height, sortOrder: 1 } });
       await tx.candidateAsset.create({ data: { candidateId: candidate.id, candidateVersionId: version.id, storedFileId: htmlFile.id, kind: "HTML" } });
-      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CANDIDATE_SUBMITTED", resourceType: "CANDIDATE", resourceId: candidate.id, after: { title: input.title, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CANDIDATE_SUBMITTED", resourceType: "CANDIDATE", resourceId: candidate.id, after: { title: input.title, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion, imageProcessing: screenshot.transform }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return candidate;
     });
-    return json(created, 201);
+    return json({ ...created, imageProcessing: screenshot.transform }, 201);
   }
   const candidateMatch = path.match(/^candidates\/([^/]+)(?:\/(hard-check|submit))?$/);
   if (candidateMatch) {

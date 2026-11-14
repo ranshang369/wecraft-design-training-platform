@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, useApi } from "@/lib/client";
 import { PageHeader } from "@/components/ui";
 import { DIMENSIONS } from "@/lib/constants";
+import { readScreenshotFile, screenshotFitHint, SCREENSHOT_ACCEPT, type ClientScreenshot } from "@/lib/client-image";
 import {
   INTENT_TAGS,
   START_POINTS,
@@ -27,15 +28,6 @@ const EMPTY_HTML = `<!doctype html>
 </head>
 <body><main class="page"><div class="eyebrow">FIELD NOTE / 01</div><h1>这里写案例标题</h1><p>这里写案例正文。先让内容决定空间、材料与阅读节奏，再决定装饰。</p></main></body>
 </html>`;
-
-function fileToDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 function emptyVisualGrammar() {
   return Object.fromEntries(VISUAL_GRAMMAR_FIELDS.map((field) => [field.key, ""])) as Record<string, string>;
@@ -61,7 +53,7 @@ export default function NewCasePage() {
     html: EMPTY_HTML,
     selfScores: Object.fromEntries(DIMENSIONS.map((dimension) => [dimension.code, 4])),
   });
-  const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [screenshot, setScreenshot] = useState<ClientScreenshot | null>(null);
   const [previewTab, setPreviewTab] = useState<"screenshot" | "html">("screenshot");
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -105,7 +97,7 @@ export default function NewCasePage() {
     setError(null);
     setWarnings([]);
     if (!screenshot) {
-      setError("请上传 375px 截图");
+      setError("请上传截图");
       return;
     }
     if (!form.startPoints.length) {
@@ -126,7 +118,7 @@ export default function NewCasePage() {
         briefId: form.briefId || null,
         antiPatterns: form.antiPatterns.split("\n").map((value: string) => value.trim()).filter(Boolean),
         mechanismTags: form.mechanismTags.split(/[，,]/).map((value: string) => value.trim()).filter(Boolean),
-        screenshotDataUrl: screenshot,
+        screenshotDataUrl: screenshot.dataUrl,
         selfScores: Object.fromEntries(
           Object.entries(form.selfScores).map(([key, value]) => [key, value === "N/A" ? null : Number(value)]),
         ),
@@ -162,10 +154,11 @@ export default function NewCasePage() {
           </div>
           {previewTab === "screenshot" ? <div className="evidence-tab-panel">
             <div className={"upload-zone " + (screenshot ? "has-image" : "")}>
-              {screenshot ? <img className="preview-image" src={screenshot} alt="375px 案例截图预览" /> : <div className="empty" style={{ minHeight: 280 }}><strong>上传 375px 截图</strong><div className="small" style={{ marginTop: 6 }}>PNG / JPG / WebP / SVG，建议 375px 或 750px 宽</div></div>}
-              <input className="input" style={{ marginTop: 12 }} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={async (event) => { const file = event.target.files?.[0]; if (file) setScreenshot(await fileToDataUrl(file)); }} />
+              {screenshot ? <img className="preview-image" src={screenshot.dataUrl} alt="案例截图预览" /> : <div className="empty" style={{ minHeight: 280 }}><strong>上传原始截图</strong><div className="small" style={{ marginTop: 6 }}>无需预先裁切；平台会自动识别并适配</div></div>}
+              <input className="input" style={{ marginTop: 12 }} type="file" accept={SCREENSHOT_ACCEPT} onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setError(null); try { setScreenshot(await readScreenshotFile(file)); } catch (uploadError) { setScreenshot(null); setError(uploadError instanceof Error ? uploadError.message : "无法读取截图"); } }} />
             </div>
-            <div className="small muted" style={{ marginTop: 10 }}>{screenshot ? "已上传截图。提交后会作为当前版本的不可变视觉证据。" : "截图是必填项；没有移动端证据的案例不能提交审核。"}</div>
+            <div className="small muted" style={{ marginTop: 10 }}>{screenshotFitHint(screenshot)}</div>
+            {!screenshot ? <div className="small muted" style={{ marginTop: 4 }}>截图是必填项；没有视觉证据的案例不能提交审核。</div> : null}
           </div> : <div className="evidence-tab-panel">
             <textarea className="textarea tall mono html-editor" value={form.html} onChange={(event) => set("html", event.target.value)} aria-label="HTML 证据" />
             <div className="small muted" style={{ marginTop: 10 }}>保存前会清洗脚本、表单和外部资源；预览始终运行在沙箱 iframe 中。</div>

@@ -41,7 +41,7 @@ Base URL: `/api/v1`. Except for login, health check and invitation acceptance, a
 
 ## 优质案例
 
-创建案例的核心字段：`title, archetype, briefId, applicableConditions, designMechanism, antiPatterns, mechanismTags, selfScores, sourceType, sourceNote, html, screenshotDataUrl`。截图必须是 375px 或 750px（2x）PNG/JPEG/WebP/SVG，最大 8 MB。
+创建案例的核心字段：`title, archetype, briefId, applicableConditions, designMechanism, antiPatterns, mechanismTags, selfScores, sourceType, sourceNote, html, screenshotDataUrl`。截图支持宽度 ≥300px 的 PNG/JPEG/WebP/SVG，最大 8 MB；服务端自动纠正 EXIF 方向、裁去均匀外框并生成 375/750px 宽的 `SCREENSHOT_375`，原始字节保存为 `SOURCE`。创建响应额外返回 `imageProcessing`。
 
 | 方法 | 路径 | 输入/输出 | 权限 |
 | --- | --- | --- | --- |
@@ -89,7 +89,7 @@ Base URL: `/api/v1`. Except for login, health check and invitation acceptance, a
 | 方法 | 路径 | 输入/输出 | 权限 |
 | --- | --- | --- | --- |
 | `GET` | `/candidates` | 候选、当前版本、最新硬检查；非管理角色隐藏模型字段；非 Owner/Admin 过滤 Holdout 候选 | 登录用户 |
-| `POST` | `/candidates` | `{ title, briefId, experimentId?, modelProvider, modelName, modelVersion, html, screenshotDataUrl }` | AI_ENGINEER |
+| `POST` | `/candidates` | `{ title, briefId, experimentId?, modelProvider, modelName, modelVersion, html, screenshotDataUrl }`；截图同样生成 `SOURCE + SCREENSHOT_375` | AI_ENGINEER |
 | `GET` | `/candidates/:id` | 候选、资产、版本、最新硬检查 | 登录用户；Holdout 候选仅 OWNER/ADMIN；VIEWER 仅已进入或完成盲测的候选 |
 | `POST` | `/candidates/:id/hard-check` | 无；执行 HC-01…HC-05；输出 `{ ok, run, checks }` | AI_ENGINEER |
 | `POST` | `/candidates/:id/submit` | 无；执行硬检查并按结果更新状态 | AI_ENGINEER |

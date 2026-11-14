@@ -17,7 +17,7 @@ export default function DashboardPage() {
   return <>
     <PageHeader title="设计训练工作台" description="一屏查看案例、授权、评审与盲测状态。所有指标都可回溯到具体记录。" />
     {canEditCases || canCreateDataset ? <div className="quick-actions" style={{ gridTemplateColumns: canEditCases && canCreateDataset ? undefined : "1fr" }}>
-      {canEditCases ? <Link className="quick-action primary" href="/cases/new"><span className="quick-action-icon">＋</span><span className="quick-action-copy"><strong>录入设计案例</strong><small>上传 375px 截图，填写机制、证据与六维评分</small></span><span className="quick-action-arrow">→</span></Link> : null}
+      {canEditCases ? <Link className="quick-action primary" href="/cases/new"><span className="quick-action-icon">＋</span><span className="quick-action-copy"><strong>录入设计案例</strong><small>上传原始截图，自动适配 375/750px，填写机制、证据与六维评分</small></span><span className="quick-action-arrow">→</span></Link> : null}
       {canCreateDataset ? <Link className="quick-action" href="/datasets/new"><span className="quick-action-icon">＋</span><span className="quick-action-copy"><strong>创建数据集</strong><small>选择条目，完成授权校验、冻结与可追溯导出</small></span><span className="quick-action-arrow">→</span></Link> : null}
     </div> : null}
     <div className="grid grid-4">

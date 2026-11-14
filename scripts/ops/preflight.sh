@@ -91,10 +91,10 @@ fi
 
 if [[ "$MODE" == "pilot" ]]; then
   if [[ -n "${ALERT_WEBHOOK_URL:-}" ]]; then pass "alert_config" "ALERT_WEBHOOK_URL configured"; else block "alert_config" "ALERT_WEBHOOK_URL 未配置"; fi
-  if [[ -r "$STATE_DIR/last-alert-test" ]] && find "$STATE_DIR/last-alert-test" -mmin -1440 -print -quit | grep -q . && grep -q 'result=ok' "$STATE_DIR/last-alert-test"; then
+  if [[ -r "$STATE_DIR/last-alert-test" ]] && find "$STATE_DIR/last-alert-test" -mmin -10080 -print -quit | grep -q . && grep -q 'result=ok' "$STATE_DIR/last-alert-test"; then
     pass "alert_delivery_test" "$(head -n 1 "$STATE_DIR/last-alert-test")"
   else
-    block "alert_delivery_test" "24 小时内没有成功的 test-alert 记录"
+    block "alert_delivery_test" "7 天内没有成功的 test-alert 记录"
   fi
 
   if [[ -n "${RCLONE_REMOTE:-}" ]]; then pass "offsite_config" "RCLONE_REMOTE configured"; else block "offsite_config" "RCLONE_REMOTE 未配置"; fi

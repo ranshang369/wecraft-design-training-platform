@@ -72,7 +72,7 @@ bash /opt/wecraft-training/scripts/ops/test-alert.sh
 cat /var/lib/wecraft-training/last-alert-test
 ```
 
-成功标准：测试群收到消息，命令输出 `ALERT_TEST_OK`，状态文件包含 `result=ok`。webhook 不得写入 Git、聊天记录或公开文档。
+成功标准：测试群收到消息，命令输出 `ALERT_TEST_OK`，状态文件包含 `result=ok`，且记录在 7 天内。建议每周执行一次并轮换值班人。webhook 不得写入 Git、聊天记录或公开文档。
 
 ### 4.2 异地备份
 
@@ -103,6 +103,8 @@ cat /var/lib/wecraft-training/last-restore-drill
 4. 固定 Holdout brief、B0/B1 模型版本、提示词、参数、seed 和排除规则。
 5. 完成至少 30 个 Holdout pair，由 3 名独立评审盲评，裁决人不得兼任同组评审。
 6. 在实验详情页查看胜率、95% bootstrap 置信区间、TIE 率、样本量和硬检查失败率。
+
+按角色、主型、授权和评审拆分的四周执行节奏见[正式试点数据生产计划](pilot-data-production.md)。
 
 ## 5. 效果验收口径
 

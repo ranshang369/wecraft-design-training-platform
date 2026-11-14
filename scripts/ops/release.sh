@@ -42,6 +42,11 @@ fi
 
 APP_URL="$(sed -n 's/^APP_URL=//p' "$ENV_FILE" | head -n 1)"
 [[ "$APP_URL" == https://* ]] || { printf 'APP_URL must be an HTTPS URL\n' >&2; exit 2; }
+DEMO_SEED_IF_EMPTY="$(sed -n 's/^DEMO_SEED_IF_EMPTY=//p' "$ENV_FILE" | head -n 1)"
+[[ "$DEMO_SEED_IF_EMPTY" == 0 ]] || {
+  printf 'refusing production release: DEMO_SEED_IF_EMPTY must be 0\n' >&2
+  exit 2
+}
 
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 IMAGE="wecraft-design-training-app:$REVISION"
@@ -124,3 +129,7 @@ fi
 
 printf '%s\n' "$REVISION" > "$STATE_DIR/last-release"
 printf 'RELEASE_OK revision=%s image=%s health=%s\n' "$REVISION" "$IMAGE" "$health"
+if ! bash "$ROOT/scripts/ops/preflight.sh"; then
+  printf 'POST_RELEASE_PREFLIGHT_BLOCKED see output above\n' >&2
+  exit 1
+fi

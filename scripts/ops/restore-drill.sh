@@ -22,6 +22,7 @@ fi
 docker exec -i "$DB_CONTAINER" pg_restore -l < "$backup_file" >/dev/null
 
 restore_db="wecraft_restore_$(date +%Y%m%d_%H%M%S)"
+STATE_DIR="${WECRAFT_TRAINING_STATE_DIR:-/var/lib/wecraft-training}"
 case "$restore_db" in
   wecraft_restore_[0-9]*) ;;
   *) echo "refusing unsafe restore database name"; exit 2 ;;
@@ -39,4 +40,7 @@ docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER" -d "$restore_db" -v ON_ERRO
 
 trap - EXIT
 cleanup
+install -d -m 700 "$STATE_DIR"
+printf 'timestamp=%s\nsource=%s\nresult=ok\n' "$(date -Iseconds)" "$backup_file" > "$STATE_DIR/last-restore-drill"
+chmod 600 "$STATE_DIR/last-restore-drill"
 echo "RESTORE_DRILL_OK source=$backup_file"

@@ -4,7 +4,7 @@
 
 训练平台当前运行于 <https://wecraft-training.zer-go.cn>，使用独立 Docker Compose Stack、PostgreSQL 16 和 Caddy HTTPS，部署在 Ubuntu 22.04 ECS 上。成员使用邮箱和密码直接登录；演示账号密码只通过受控渠道分发，不写入 Git 或公开文档。
 
-完整拓扑、重新部署、验收、更新回滚与备份步骤见[稳定公网部署](stable-public.md)。训练 Stack 不连接 WeCraft 生产数据库，只借用现有 Caddy 的边缘网络入口。
+完整拓扑、重新部署、验收、更新回滚与备份步骤见[稳定公网部署](stable-public.md)；正式投用门禁、签收和逐项关闭命令见[正式投用切换清单](production-cutover.md)。训练 Stack 不连接 WeCraft 生产数据库，只借用现有 Caddy 的边缘网络入口。
 
 ## 运行拓扑
 
@@ -46,7 +46,7 @@ docker compose -f deploy/docker-compose.yml down
 | `STORAGE_DRIVER` | 是 | `local` 或 `database`；无持久盘的云环境必须使用 `database`。 |
 | `STORAGE_ROOT` | 仅 local | 本地文件持久卷挂载点，例如 `/app/storage`。 |
 | `SITE_ACCESS_PASSWORD` | 可选 | 站点级 Basic Auth 口令；启用时 `/api/v1/health` 始终放行。稳定公网当前留空，直接使用邮箱密码登录。 |
-| `DEMO_SEED_IF_EMPTY` | 演示可选 | 设为 `1` 时，空库自动播种；已有 Workspace 时跳过，不删除数据。 |
+| `DEMO_SEED_IF_EMPTY` | 生产必须 | 正式环境必须为 `0`；发布脚本会拒绝其他值。仅本地/隔离演示可设为 `1`。 |
 | `DEMO_PASSWORD` | 演示可选 | 公网演示账号密码；必须使用强随机值，不得提交到 Git。 |
 | `PLAYWRIGHT_CHROMIUM_EXECUTABLE` | 否 | 系统 Chrome/Chromium 路径；为空时使用 Playwright 默认浏览器。 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `FEISHU_REDIRECT_URI` | 否 | 预留适配层；MVP 未启用 OAuth 与真实消息发送。 |
@@ -85,6 +85,36 @@ npm run bootstrap:admin
 ```
 
 脚本幂等，可重复执行；已存在的邮箱不会被重置密码，只会确保账号处于 ACTIVE、加入目标 Workspace 并获得 OWNER 角色。首次初始化会写 `BOOTSTRAP_ADMIN` 审计事件。执行后立即从部署平台删除一次性密码变量。
+
+### 正式试点 Workspace 初始化
+
+在已有 OWNER 账号后，用受控环境变量创建独立试点空间，停用演示账号并把 Owner 迁入。命令必须显式确认，不能用于演示 Workspace：
+
+```bash
+docker exec \
+  -e CONFIRM_INITIALIZE_PILOT=1 \
+  -e PILOT_OWNER_EMAIL='owner@your-domain.example' \
+  -e PILOT_WORKSPACE_NAME='WeCraft 设计训练正式试点' \
+  -e PILOT_WORKSPACE_SLUG='wecraft-pilot' \
+  -e PILOT_DISABLE_DEMO_USERS=1 \
+  -e PILOT_DEACTIVATE_OTHER_MEMBERSHIPS=1 \
+  wecraft-design-training-app-1 \
+  npx tsx scripts/ops/initialize-pilot.ts
+```
+
+脚本是幂等的，会写 `PILOT_WORKSPACE_INITIALIZED` 或 `PILOT_WORKSPACE_UPDATED` 与 `DEMO_USER_DISABLED` 审计事件。执行前确认目标 Workspace，执行后检查演示账号已停用、Owner 只保留必要角色，并立即创建独立团队成员账号。
+
+### 发布后门禁
+
+```bash
+cd /opt/wecraft-training
+bash scripts/ops/preflight.sh
+bash scripts/ops/preflight.sh --pilot
+bash scripts/ops/restore-drill.sh
+bash scripts/ops/test-alert.sh
+```
+
+`preflight.sh` 为只读检查：`runtime` 检查公网、容器、备份、监控和发布一致性；`--pilot` 额外检查告警、异地副本、恢复演练、演示开关、正式账号、数据量、双评和 Holdout。`restore-drill.sh` 只操作隔离恢复库，`test-alert.sh` 必须已配置 webhook。
 
 ## 反向代理与 TLS
 
@@ -133,4 +163,23 @@ Render Free 不是当前稳定环境，只作为备用演示。完全免费的�
 - 最新备份是否存在且不超过 26 小时。
 
 配置飞书机器人后，告警和恢复通知会发送到群；未配置时脚本会明确输出跳过原因。后续仍应补充 5xx 率、P95 延迟、硬检查 ERROR、导出失败和审计写入失败的指标监控。
+
+配置和验证步骤：
+
+```bash
+install -m 600 deploy/training/monitor.env.example /etc/wecraft-training/monitor.env
+# 编辑 ALERT_WEBHOOK_URL 与 ALERT_WEBHOOK_KIND=feishu，不要把 webhook 打印到终端或提交 Git
+chmod 600 /etc/wecraft-training/monitor.env
+bash scripts/ops/test-alert.sh
+cat /var/lib/wecraft-training/last-alert-test
+```
+
+异地备份使用独立的 rclone remote，不复用 WeCraft 生产密钥：
+
+```bash
+install -m 600 deploy/training/backup.env.example /etc/wecraft-training/backup.env
+# 编辑 RCLONE_REMOTE，例如 wecraft-training-backup:wecraft-training
+bash scripts/ops/backup-postgres.sh
+cat /var/lib/wecraft-training/last-offsite-copy
+```
 

@@ -66,6 +66,10 @@ export const STATUS_LABELS: Record<string, string> = {
   CASE_SOURCE: "案例来源",
   GOLDEN_EVAL: "黄金评测",
   BOTH: "案例 + 评测",
+  INSUFFICIENT_SAMPLE: "样本不足",
+  OBSERVED_BENEFIT: "观察到优势",
+  OBSERVED_HARM: "观察到劣势",
+  INCONCLUSIVE: "尚无定论",
 };
 
 export const DIMENSION_CODES = DIMENSIONS.map((d) => d.code);

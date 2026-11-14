@@ -45,6 +45,11 @@ if [[ -n "${RCLONE_REMOTE:-}" ]]; then
   command -v rclone >/dev/null 2>&1 || { echo "RCLONE_REMOTE is set but rclone is not installed"; exit 1; }
   rclone copyto --immutable "$base" "${RCLONE_REMOTE%/}/$(basename "$base")"
   rclone copyto --immutable "$base.sha256" "${RCLONE_REMOTE%/}/$(basename "$base.sha256")"
+  rclone check "$base" "${RCLONE_REMOTE%/}/$(basename "$base")" --one-way >/dev/null
+  STATE_DIR="${WECRAFT_TRAINING_STATE_DIR:-/var/lib/wecraft-training}"
+  install -d -m 700 "$STATE_DIR"
+  printf 'timestamp=%s\nremote=%s\nsource=%s\nresult=ok\n' "$(date -Iseconds)" "$RCLONE_REMOTE" "$base" > "$STATE_DIR/last-offsite-copy"
+  chmod 600 "$STATE_DIR/last-offsite-copy"
   echo "offsite_copy=ok remote=$RCLONE_REMOTE"
 else
   echo "offsite_copy=skipped reason=RCLONE_REMOTE_not_configured"

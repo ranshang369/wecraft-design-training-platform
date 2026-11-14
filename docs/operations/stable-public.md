@@ -12,6 +12,10 @@
 
 登录方式：打开登录页后，直接使用分配的邮箱账号和密码登录；不再要求站点级 Basic Auth 口令。演示密码不写入 Git、公开飞书文档或聊天记录。
 
+公网已经切换到正式试点 Workspace `wecraft-pilot`。原演示 Workspace `wecraft-design` 保留但隔离，8 个 `@example.test` 演示账号已停用；正式成员必须使用 OWNER/ADMIN 发放的邀请链接和独立账号。
+
+正式投用的剩余门禁和签收证据见[正式投用切换清单](production-cutover.md)。
+
 ## 2026-11-13 验收记录
 
 - HTTPS 健康检查返回 `200`，响应包含 `ok: true`；根路径 `307` 跳转到 `/login`，登录页返回 `200`，不再弹出 Basic Auth 口令框。
@@ -25,13 +29,13 @@
 ## 2026-11-14 生产化验收记录
 
 - 健康检查返回 `200`、`ok: true`、`database: "ok"` 和部署版本号；数据库故障会返回 `503`。
-- 当前训练应用 revision 为 `20261114T1530-0d3a112`；应用与数据库容器均健康，登录后仪表盘、实验、数据集、成员和审计页面返回 `200`。
-- 仪表盘已增加“正式试点数据门禁”，显示 30 个优质案例、10 个反例、60 个黄金 Brief、主型覆盖、授权和双评六项缺口；当前仍为演示数据，门禁未通过。
+- 训练应用与数据库容器均健康，登录后仪表盘、实验、数据集、成员和审计页面返回 `200`；当前 revision 以 `/api/v1/health` 和 `/var/lib/wecraft-training/last-release` 为准。
+- 正式试点空间 `wecraft-pilot` 已创建，Owner 已迁入；演示账号已停用，`DEMO_SEED_IF_EMPTY=0`。仪表盘“正式试点数据门禁”当前仍为 0 个业务案例、0 个反例和 0 个黄金 Brief。
 - 登录失败按账号 8 次、IP 30 次阻断 15 分钟，返回 `429`；限流键只保存 SHA-256，不落明文邮箱或 IP。
 - 并发创建数据集的编号冲突已修复；编号由 PostgreSQL 原子序列分配，并有 8 路并发 E2E 回归。
 - Holdout 支持 2–3 名独立评审，裁决人不得兼任评审，候选制作人不得参与同组评审或裁决；结果按固定候选 A/B 归一化。
 - 每日 `02:30` 自动备份 PostgreSQL，30 天保留，备份带 SHA-256 和 `pg_restore` 可读性校验；已在隔离数据库完成一次恢复演练。
-- 每 5 分钟检查健康、数据库、容器、磁盘和备份新鲜度；监控当前仅写本机日志，飞书 webhook 尚未配置。
+- 每 5 分钟检查健康、数据库、容器、磁盘、发布 revision、Caddy 路由和备份新鲜度；飞书 webhook 尚未配置，告警仍只写本机日志。
 - 所有 JSON API 统一限制 10MB 请求体，超限返回 `413 PAYLOAD_TOO_LARGE`。
 - 发布已改用固定 revision 镜像、共享生产发布锁、发布前备份和发布后公网校验；当前镜像另保存为带 SHA-256 的 zstd 归档，可在本地镜像被清理后恢复。
 - 共用主机的并发构建曾在 15:03、15:22、15:30、15:33 多次触发内存保护，并在 15:29 清理训练容器与镜像，造成训练站点 502。当前已恢复；正式生产必须迁移独立主机/Docker daemon，或在发布窗口内由双方显式串行并值守。
@@ -81,7 +85,7 @@ docker compose --env-file deploy/training/.env -f deploy/training/docker-compose
 docker compose --env-file deploy/training/.env -f deploy/training/docker-compose.yml logs --tail 100 app
 ```
 
-首次空库会依次执行迁移和演示种子；已有 Workspace 时种子自动跳过，不会清空业务数据。
+首次启动只执行 `prisma migrate deploy`。`deploy/training/.env.example` 默认 `DEMO_SEED_IF_EMPTY=0`，不会自动写入演示数据；正式环境禁止把该值改为 `1`。
 
 ## Caddy 路由
 
@@ -114,6 +118,8 @@ grep -q 'wecraft-training.zer-go.cn' /opt/wecraft/deploy/Caddyfile \
 ```bash
 curl -fsS https://wecraft-training.zer-go.cn/api/v1/health
 curl -sS -o /dev/null -w '%{http_code}\n' https://wecraft-training.zer-go.cn/
+cd /opt/wecraft-training
+bash scripts/ops/preflight.sh
 ```
 
 期望健康检查为 `200` 且返回 `ok: true`；根路径返回 `307` 并跳转到 `/login`，登录页返回 `200`。随后用浏览器完成：
@@ -147,7 +153,7 @@ bash /opt/wecraft-training/scripts/ops/restore-drill.sh /var/backups/wecraft-tra
 
 备份写入 `/var/backups/wecraft-training`，默认保留 30 天；恢复演练会创建临时数据库、校验至少一个 Workspace 后立即删除，不触碰生产库。
 
-仍需配置 `RCLONE_REMOTE` 完成异地副本。当前 `backup.env` 留空时脚本会明确输出 `offsite_copy=skipped`，不能把本机备份视为灾备完成。
+仍需配置 `RCLONE_REMOTE` 完成异地副本。当前 `backup.env` 留空时脚本会明确输出 `offsite_copy=skipped`，不能把本机备份视为灾备完成。配置后必须验证 `last-offsite-copy` 为 26 小时内且 `result=ok`。
 
 数据库密码、会话密钥和账号密码只存放在服务器 `/opt/wecraft-training/deploy/training/.env` 与受控密钥库，不写入 Git 或公开飞书文档。
 
@@ -158,12 +164,19 @@ systemctl status wecraft-training-monitor.timer --no-pager
 bash /opt/wecraft-training/scripts/ops/monitor.sh
 ```
 
-监控每 5 分钟检查 HTTPS 健康、数据库、应用/数据库容器状态、磁盘 85% 阈值、备份 26 小时新鲜度和训练平台 Caddy 路由。将飞书自定义机器人 webhook 写入 `/etc/wecraft-training/monitor.env` 的 `ALERT_WEBHOOK_URL` 后，告警才会实际送达；webhook 文件必须保持 `600`，不得提交到 Git。
+监控每 5 分钟检查 HTTPS 健康、数据库、应用/数据库容器状态、磁盘 85% 阈值、备份 26 小时新鲜度、发布 revision 和训练平台 Caddy 路由。将飞书自定义机器人 webhook 写入 `/etc/wecraft-training/monitor.env` 的 `ALERT_WEBHOOK_URL` 后，告警才会实际送达；webhook 文件必须保持 `600`，不得提交到 Git。配置后执行：
+
+```bash
+bash scripts/ops/test-alert.sh
+cat /var/lib/wecraft-training/last-alert-test
+```
+
+成功必须同时看到 `ALERT_TEST_OK` 和飞书群中的测试消息。
 
 ## 已知边界
 
 - 主入口依赖 `zer-go.cn` 的 `wecraft-training` A 记录；修改 DNS 时必须保持指向 `39.105.45.154`，并同步更新 `APP_URL` 与 Caddy Host。旧 `sslip.io` 地址仍作为兼容别名保留。
 - 当前未启用 MFA、企业 SSO、WAF 或 IP 允许列表；邮箱登录已启用失败节流和健康监控，但仍应通过受控渠道分发地址。
 - 自动备份目前只在本机；异地备份和飞书告警送达仍需配置外部凭据。
-- 当前数据是虚构演示数据，不包含真实案例、授权证据或生产内容。
+- 公网试点空间当前没有真实业务数据；原虚构演示数据只保留在隔离 Workspace，不用于正式验收。
 - 部署健康与功能冒烟通过，不等于模型训练已经产生可验证的设计提升。训练效果必须用 HOLD OUT 实验、盲评一致性和可复现证据单独验收。

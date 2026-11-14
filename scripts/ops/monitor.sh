@@ -14,15 +14,45 @@ HEALTH_URL="${HEALTH_URL:-https://wecraft-training.zer-go.cn/api/v1/health}"
 DB_CONTAINER="${DB_CONTAINER:-wecraft-design-training-db-1}"
 APP_CONTAINER="${APP_CONTAINER:-wecraft-design-training-app-1}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/wecraft-training}"
+EXPECTED_REVISION_FILE="${EXPECTED_REVISION_FILE:-/var/lib/wecraft-training/last-release}"
 MAX_DISK_PERCENT="${MAX_DISK_PERCENT:-85}"
 MAX_BACKUP_AGE_MINUTES="${MAX_BACKUP_AGE_MINUTES:-1560}"
 STATE_FILE="${STATE_FILE:-/run/wecraft-training-monitor.state}"
 CADDYFILE="${CADDYFILE:-/opt/wecraft/deploy/Caddyfile}"
 
 failures=()
+join_failures() {
+  local IFS=,
+  printf '%s' "${failures[*]}"
+}
+
+send_webhook() {
+  local text="$1" kind="${ALERT_WEBHOOK_KIND:-generic}" payload response
+  if [[ -z "${ALERT_WEBHOOK_URL:-}" ]]; then
+    echo "alert_delivery=skipped reason=ALERT_WEBHOOK_URL_not_configured"
+    return 2
+  fi
+  payload="$(jq -n --arg text "$text" --arg kind "$kind" 'if $kind == "feishu" then {msg_type:"text",content:{text:$text}} elif $kind == "slack" then {text:$text} else {source:"wecraft-training",text:$text} end')"
+  if ! response="$(curl -fsS --max-time 10 -H 'Content-Type: application/json' -d "$payload" "$ALERT_WEBHOOK_URL" 2>/dev/null)"; then
+    echo "alert_delivery=failed reason=http_request_failed"
+    return 1
+  fi
+  if [[ "$kind" == "feishu" ]] && ! jq -e '.code == 0 or .StatusCode == 0' >/dev/null 2>&1 <<<"$response"; then
+    echo "alert_delivery=failed reason=feishu_rejected"
+    return 1
+  fi
+  echo "alert_delivery=sent"
+  return 0
+}
+
 health="$(curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null || true)"
 if ! grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$health" || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' <<<"$health"; then
   failures+=("healthcheck_failed")
+fi
+
+expected_revision="$(tr -d '[:space:]' < "$EXPECTED_REVISION_FILE" 2>/dev/null || true)"
+if [[ -n "$expected_revision" ]] && ! grep -Fq "\"revision\":\"$expected_revision\"" <<<"$health"; then
+  failures+=("revision_mismatch")
 fi
 
 disk_used="$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')"
@@ -33,41 +63,53 @@ fi
 latest_backup="$(readlink -f "$BACKUP_DIR/latest.dump" 2>/dev/null || true)"
 if [[ -z "$latest_backup" || ! -s "$latest_backup" ]] || ! find "$latest_backup" -mmin -"$MAX_BACKUP_AGE_MINUTES" -print -quit | grep -q .; then
   failures+=("backup_stale")
+elif [[ ! -r "$latest_backup.sha256" ]]; then
+  failures+=("backup_checksum_missing")
+elif ! sha256sum -c "$latest_backup.sha256" >/dev/null 2>&1; then
+  failures+=("backup_checksum_failed")
 fi
 
 app_health="$(docker inspect "$APP_CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || echo missing)"
 db_health="$(docker inspect "$DB_CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || echo missing)"
 [[ "$app_health" == "healthy" ]] || failures+=("app_${app_health}")
 [[ "$db_health" == "healthy" ]] || failures+=("db_${db_health}")
-if [[ -r "$CADDYFILE" ]] && ! grep -q 'wecraft-training.zer-go.cn' "$CADDYFILE"; then
+if [[ ! -r "$CADDYFILE" ]] || ! grep -q 'wecraft-training.zer-go.cn' "$CADDYFILE"; then
   failures+=("caddy_route_missing")
 fi
 
 previous="$(cat "$STATE_FILE" 2>/dev/null || true)"
 if ((${#failures[@]})); then
-  message="[WeCraft Training] ALERT $(date -Iseconds): ${failures[*]} health=${health:-unreachable} disk=${disk_used}% app=${app_health} db=${db_health}"
+  message="[WeCraft Training] ALERT $(date -Iseconds): $(join_failures) health=${health:-unreachable} disk=${disk_used}% app=${app_health} db=${db_health} expected_revision=${expected_revision:-unknown}"
   echo "$message"
-  if [[ "${previous:-}" != alert ]]; then
-    if [[ -n "${ALERT_WEBHOOK_URL:-}" ]]; then
-      kind="${ALERT_WEBHOOK_KIND:-generic}"
-      payload="$(jq -n --arg text "$message" --arg kind "$kind" 'if $kind == "feishu" then {msg_type:"text",content:{text:$text}} elif $kind == "slack" then {text:$text} else {source:"wecraft-training",text:$text} end')"
-      curl -fsS --max-time 10 -H 'Content-Type: application/json' -d "$payload" "$ALERT_WEBHOOK_URL" >/dev/null || echo "alert_delivery=failed"
+  state="alert"
+  if [[ "${previous:-}" != alert && "${previous:-}" != alert_local && "${previous:-}" != alert_pending ]]; then
+    if send_webhook "$message"; then
+      state="alert"
     else
-      echo "alert_delivery=skipped reason=ALERT_WEBHOOK_URL_not_configured"
+      delivery_status=$?
+      state=$([[ "$delivery_status" == 2 ]] && echo "alert_local" || echo "alert_pending")
     fi
+  elif [[ "${previous:-}" == alert_pending ]]; then
+    if send_webhook "$message"; then state="alert"; else state="alert_pending"; fi
   fi
-  printf 'alert\n' > "$STATE_FILE"
+  printf '%s\n' "$state" > "$STATE_FILE"
   exit 1
 fi
 
-if [[ "${previous:-}" == alert ]]; then
-  message="[WeCraft Training] RECOVERED $(date -Iseconds): health ok, disk=${disk_used}%, app=${app_health}, db=${db_health}"
+if [[ "${previous:-}" == alert || "${previous:-}" == alert_local || "${previous:-}" == alert_pending ]]; then
+  message="[WeCraft Training] RECOVERED $(date -Iseconds): health ok, disk=${disk_used}%, app=${app_health}, db=${db_health}, revision=${expected_revision:-unknown}"
   echo "$message"
-  if [[ -n "${ALERT_WEBHOOK_URL:-}" ]]; then
-    kind="${ALERT_WEBHOOK_KIND:-generic}"
-    payload="$(jq -n --arg text "$message" --arg kind "$kind" 'if $kind == "feishu" then {msg_type:"text",content:{text:$text}} elif $kind == "slack" then {text:$text} else {source:"wecraft-training",text:$text} end')"
-    curl -fsS --max-time 10 -H 'Content-Type: application/json' -d "$payload" "$ALERT_WEBHOOK_URL" >/dev/null || echo "alert_delivery=failed"
+  if send_webhook "$message"; then
+    printf 'ok\n' > "$STATE_FILE"
+  else
+    delivery_status=$?
+    if [[ "$delivery_status" == 2 ]]; then
+      printf 'ok\n' > "$STATE_FILE"
+      exit 0
+    fi
+    printf 'alert_pending\n' > "$STATE_FILE"
+    exit 1
   fi
 fi
 printf 'ok\n' > "$STATE_FILE"
-echo "[WeCraft Training] OK $(date -Iseconds): health, disk=${disk_used}%, backup, app=${app_health}, db=${db_health}"
+echo "[WeCraft Training] OK $(date -Iseconds): health, revision=${expected_revision:-unknown}, disk=${disk_used}%, backup+sha256, app=${app_health}, db=${db_health}"

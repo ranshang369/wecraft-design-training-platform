@@ -7,6 +7,7 @@ const BADGE_CLASS: Record<string, string> = {
   ARBITRATION: "amber", PENDING: "amber", ASSIGNED: "amber", CHANGES_REQUESTED: "amber", READY_FOR_APPROVAL: "amber", VALIDATING: "amber",
   REJECTED: "red", BLOCKED: "red", HARD_CHECK_FAILED: "red", FAILED: "red", QUARANTINED: "red", REVOKED: "red", DECLINED: "red",
   DRAFT: "gray", ARCHIVED: "gray", CANCELLED: "gray", WITHDRAWN: "gray", HOLDOUT: "amber", DEV: "gray",
+  INSUFFICIENT_SAMPLE: "gray", OBSERVED_BENEFIT: "green", OBSERVED_HARM: "red", INCONCLUSIVE: "amber",
 };
 
 export function Badge({ value }: { value: string | null | undefined }) {

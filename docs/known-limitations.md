@@ -1,6 +1,6 @@
 # 已知限制与后续计划
 
-> 当前版本定位：可受控试点的生产候选版本。  
+> 当前版本定位：可受控试点的生产候选版本。公网已切换到 `wecraft-pilot`，演示账号已停用。<br>
 > 这不是生产终态；下列限制在正式上线前必须逐项关闭或由业务负责人书面接受。
 
 ## 1. 集成限制
@@ -44,6 +44,7 @@
 - 训练平台与 WeCraft 生产共用 ECS 和 Docker daemon。2026-11-14 已发生两次并发构建导致训练镜像/容器被清理的事故；目前通过共享 `/run/wecraft-release.lock`、固定 revision 镜像和离线镜像归档降低风险，但正式生产仍应迁移到独立主机或独立 Docker daemon。
 - Dockerfile 与 Docker Compose 已在 Ubuntu 22.04 稳定公网 Stack 实测；本次 Windows 开发机未运行容器。
 - GitHub Actions 已覆盖 PostgreSQL 迁移、typecheck、单测、生产构建和 E2E；尚未覆盖 Docker 镜像构建、公网部署冒烟和压力测试。
+- 正式试点空间当前没有真实优质案例、反例、黄金 Brief 或 Holdout pair；Owner 也是当前唯一真实账号。不能把演示数据或功能冒烟当作试点数据已就绪。
 
 ### Render Free 限制
 
@@ -94,3 +95,5 @@
 - `npm audit` 的 high 漏洞均有修复或书面风险接受与补偿控制。
 - Docker/Compose 在干净 Linux 环境从零启动通过（2026-11-13 已完成稳定公网 Stack 验收）。
 - 真实团队完成至少一轮案例入库、双评、盲测和数据集导出试运行。
+
+逐项状态、负责人和关闭命令见[正式投用切换清单](operations/production-cutover.md)。在 `preflight.sh --pilot` 输出 `blockers=0` 前，不得对外声明正式生产。

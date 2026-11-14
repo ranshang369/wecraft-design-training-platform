@@ -15,7 +15,7 @@ if [[ ! -r /etc/wecraft-training/monitor.env ]]; then
   install -m 600 /opt/wecraft-training/deploy/training/monitor.env.example /etc/wecraft-training/monitor.env
 fi
 
-chmod +x /opt/wecraft-training/scripts/ops/backup-postgres.sh /opt/wecraft-training/scripts/ops/restore-drill.sh /opt/wecraft-training/scripts/ops/monitor.sh /opt/wecraft-training/scripts/ops/release.sh
+chmod +x /opt/wecraft-training/scripts/ops/backup-postgres.sh /opt/wecraft-training/scripts/ops/restore-drill.sh /opt/wecraft-training/scripts/ops/monitor.sh /opt/wecraft-training/scripts/ops/release.sh /opt/wecraft-training/scripts/ops/preflight.sh /opt/wecraft-training/scripts/ops/test-alert.sh
 systemctl daemon-reload
 systemctl enable --now wecraft-training-backup.timer wecraft-training-monitor.timer
 systemctl list-timers --all 'wecraft-training-*' --no-pager

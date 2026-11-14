@@ -51,9 +51,19 @@
 
 ### 数据库
 
-- 每日 `pg_dump -Fc` 全量备份，保留 30 天；关键发布前额外备份。
+- 每日 `pg_dump -Fc` 全量备份，保留 30 天；关键发布前由 `release.sh` 额外备份。
+- 每个备份生成 SHA-256，并用 `pg_restore -l` 校验归档可读；当前路径为 `/var/backups/wecraft-training`。
+- 恢复演练只创建临时数据库，验证至少一个 Workspace 后立即删除；新脚本会写入 `/var/lib/wecraft-training/last-restore-drill`，用于 7 天新鲜度门禁。
+- 本机备份不能替代灾备。配置 `RCLONE_REMOTE` 后，备份脚本复制并反向校验对象，成功时写入 `/var/lib/wecraft-training/last-offsite-copy`；未配置时输出 `offsite_copy=skipped`。
 - 托管 PostgreSQL 开启 PITR/WAL 归档，RPO 建议不超过 15 分钟。
 - 每季度至少一次从备份恢复到隔离环境，并运行只读校验。
+
+```bash
+bash /opt/wecraft-training/scripts/ops/backup-postgres.sh
+bash /opt/wecraft-training/scripts/ops/restore-drill.sh
+cat /var/lib/wecraft-training/last-offsite-copy
+cat /var/lib/wecraft-training/last-restore-drill
+```
 
 ### 对象存储 / 本地卷
 

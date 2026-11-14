@@ -7,23 +7,25 @@
 
 平台已经具备受控试点所需的软件能力：邮箱登录、服务端 RBAC、双评与裁决、Holdout 隔离、硬检查、数据授权校验、版本冻结、ZIP 导出、审计链、自动备份、恢复演练、健康巡检和固定版本发布。
 
-但“正式全面投入使用”仍需要业务数据、真实盲测和书面签收。当前不应把演示数据或功能冒烟等同于真实训练收益。
+公网已经切换到独立试点空间 `wecraft-pilot`，演示账号已停用，`DEMO_SEED_IF_EMPTY=0`。但“正式全面投入使用”仍需要业务数据、真实盲测和书面签收。当前不应把演示数据或功能冒烟等同于真实训练收益。
 
 | 层级 | 进入条件 | 当前状态 |
 | --- | --- | --- |
-| 技术可试用 | 公网 HTTPS、登录、数据库、备份、恢复演练和核心流程通过 | 功能与部署已验证；共享主机隔离仍为风险 |
-| 受控试点 | 真实团队账号、授权证据、数据责任人和试点范围明确 | 待业务侧完成 |
+| 技术可试用 | 公网 HTTPS、登录、数据库、备份、恢复演练和核心流程通过 | 已具备；告警与异地备份未闭环，共享主机隔离仍为风险 |
+| 受控试点 | 真实团队账号、授权证据、数据责任人和试点范围明确 | 试点空间已建立，但独立账号和业务数据仍为 0 |
 | 正式生产 | 真实数据量达标、Holdout 实验完成、收益与风险经业务签收 | 未完成，不得宣称全面上线 |
+
+当前可复核状态、逐项负责人和关闭命令见[正式投用切换清单](production-cutover.md)。
 
 ## 2. 上线前必须通过的门禁
 
 ### A. 技术与运维
 
-- [ ] `https://wecraft-training.zer-go.cn/api/v1/health` 返回 `200`、`ok: true`、`database: "ok"`，revision 与本次发布一致。
-- [ ] `/login` 返回 `200`，OWNER、评审人、AI 工程三类账号均可登录。
+- [x] `https://wecraft-training.zer-go.cn/api/v1/health` 返回 `200`、`ok: true`、`database: "ok"`，revision 与本次发布一致。
+- [ ] `/login` 返回 `200`，OWNER、评审人、AI 工程三类账号均可登录（当前只有 OWNER）。
 - [ ] 当天数据库备份存在、SHA-256 校验通过，并在隔离库完成一次恢复演练。
-- [ ] `wecraft-training-backup.timer` 和 `wecraft-training-monitor.timer` 均为 `active`，最近一次巡检成功。
-- [ ] 训练平台 Caddy 路由存在；生产发布后重新确认，不存在时不得接收试点流量。
+- [x] `wecraft-training-backup.timer` 和 `wecraft-training-monitor.timer` 均为 `active`，最近一次巡检成功。
+- [x] 训练平台 Caddy 路由存在；生产发布后重新确认，不存在时不得接收试点流量。
 - [ ] 训练平台与 WeCraft 生产已使用独立 Docker daemon，或双方发布由共享锁串行且有值守；未满足时禁止同时构建。
 - [ ] 飞书告警 webhook 已配置并完成一次测试消息；仅写本机日志不算告警闭环。
 - [ ] 异地备份已配置并验证可读取；仅有同主机备份不算灾备完成。
@@ -66,9 +68,10 @@
 ```bash
 ssh <training-host>
 cd /opt/wecraft-training
-git status --short --branch
+cat /var/lib/wecraft-training/last-release
 curl -fsS https://wecraft-training.zer-go.cn/api/v1/health
 systemctl list-timers 'wecraft-training-*' --all --no-pager
+bash scripts/ops/preflight.sh
 ```
 
 确认没有其他发布构建占用主机。训练发布与 WeCraft 生产发布共用 Docker daemon 和 `/run/wecraft-release.lock`。
@@ -85,6 +88,15 @@ bash scripts/ops/release.sh <immutable-revision-tag>
 脚本会执行：获取共享发布锁、检查 `.env` 权限、创建数据库备份、构建固定版本镜像、校验镜像 revision、切换应用、等待健康、校验公网健康、revision、登录页和 Caddy 路由。
 
 正常结果应包含 `RELEASE_OK`。任何一步失败都不得继续 smoke 或对外宣布上线。
+
+发布完成后执行正式试点门禁：
+
+```bash
+cd /opt/wecraft-training
+bash scripts/ops/preflight.sh --pilot
+```
+
+`runtime` 检查必须为 0 个阻断；`--pilot` 还应检查告警送达、异地副本、恢复演练、正式账号、数据量、双评和 Holdout。数据或外部凭据未完成时，不要用演示数据填充门禁。
 
 ### 3.3 功能冒烟
 
@@ -139,4 +151,4 @@ bash scripts/ops/release.sh <immutable-revision-tag>
 | Holdout 实验结果 | AI_ENGINEER | 冻结数据集、实验报告 | 待填 | 待签 |
 | 业务试点准入 | 业务负责人 | 范围、SLA、退出条件 | 待填 | 待签 |
 
-只有五类签收均完成，才可以把状态写成“正式投入试点”；真实训练收益仍以实验结果为准。
+只有五类签收均完成，才可以把状态写成“正式投入试点”；真实训练收益仍以实验结果为准。当前签收证据统一维护在[正式投用切换清单](production-cutover.md)。

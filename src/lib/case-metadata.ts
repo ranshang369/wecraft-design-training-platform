@@ -142,7 +142,7 @@ function imageTreatmentModes(text: string): Set<string> {
   return modes;
 }
 
-function imageTreatmentIssues(text: string): string | null {
+function imageTreatmentWarning(text: string): string | null {
   if (NO_IMAGE_TREATMENT.test(text)) {
     return GRAPHIC_SUBSTITUTE.test(text)
       ? null
@@ -151,6 +151,11 @@ function imageTreatmentIssues(text: string): string | null {
   return imageTreatmentModes(text).size >= 2
     ? null
     : "图像处理必须写明至少两种图幅、裁切、边框或图注关系";
+}
+
+export interface CaseMetadataReview {
+  errors: string[];
+  warnings: string[];
 }
 
 export type InternalArchetype =
@@ -193,34 +198,65 @@ export function inferInternalArchetype(startPoints: readonly string[] | null | u
   return first ? START_POINT_ARCHETYPE[first] : "MATERIAL";
 }
 
-export function visualGrammarIssues(value: unknown): string[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return ["缺少七项视觉语法"];
+export function visualGrammarReview(value: unknown): CaseMetadataReview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { errors: ["缺少七项视觉语法"], warnings: [] };
+  }
   const record = value as Record<string, unknown>;
   const allowed = new Set<string>(VISUAL_GRAMMAR_FIELDS.map((field) => field.key));
-  const issues: string[] = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
   for (const key of Object.keys(record)) {
-    if (!allowed.has(key)) issues.push(`视觉语法含未知字段 ${key}`);
+    if (!allowed.has(key)) errors.push(`视觉语法含未知字段 ${key}`);
   }
   for (const field of VISUAL_GRAMMAR_FIELDS) {
     const raw = record[field.key];
     const text = typeof raw === "string" ? raw.trim() : "";
-    if (!text) issues.push(`视觉语法缺少 ${field.label}`);
-    else if (text.length > 600) issues.push(`视觉语法 ${field.label} 超过 600 字`);
+    if (!text) errors.push(`视觉语法缺少 ${field.label}`);
+    else if (text.length > 600) errors.push(`视觉语法 ${field.label} 超过 600 字`);
     else if (field.key === "imageTreatment") {
-      const imageIssue = imageTreatmentIssues(text);
-      if (imageIssue) issues.push(imageIssue);
+      const imageWarning = imageTreatmentWarning(text);
+      if (imageWarning) warnings.push(imageWarning);
     }
   }
-  return issues;
+  return { errors, warnings };
+}
+
+export function visualGrammarIssues(value: unknown): string[] {
+  const review = visualGrammarReview(value);
+  return [...review.errors, ...review.warnings];
+}
+
+export function structureSignatureReview(value: unknown): CaseMetadataReview {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return { errors: ["缺少结构签名"], warnings: [] };
+  if (text.length > 1_000) return { errors: ["结构签名超过 1,000 字"], warnings: [] };
+  const steps = text.split(/\s*(?:>|→|\||｜|\/)\s*/).filter(Boolean);
+  if (steps.length < 3) {
+    return { errors: [], warnings: ["结构签名至少要用三个可比较的阅读步骤描述"] };
+  }
+  return { errors: [], warnings: [] };
 }
 
 export function structureSignatureIssues(value: unknown): string[] {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text) return ["缺少结构签名"];
-  if (text.length > 1_000) return ["结构签名超过 1,000 字"];
-  const steps = text.split(/\s*(?:>|→|\||｜|\/)\s*/).filter(Boolean);
-  if (steps.length < 3) return ["结构签名至少要用三个可比较的阅读步骤描述"];
-  return [];
+  const review = structureSignatureReview(value);
+  return [...review.errors, ...review.warnings];
+}
+
+export function caseMetadataReview(input: {
+  visualGrammar?: unknown;
+  structureSignature?: unknown;
+  bodyMechanism?: unknown;
+}): CaseMetadataReview {
+  const visual = visualGrammarReview(input.visualGrammar);
+  const structure = structureSignatureReview(input.structureSignature);
+  const errors = [...visual.errors, ...structure.errors];
+  const warnings = [...visual.warnings, ...structure.warnings];
+  const bodyMechanism = typeof input.bodyMechanism === "string" ? input.bodyMechanism.trim() : "";
+  if (bodyMechanism.length < 24) {
+    errors.push("正文承接机制至少需要说明首屏之后章节如何继续展开");
+  }
+  return { errors, warnings };
 }
 
 export function caseMetadataIssues(input: {
@@ -228,17 +264,12 @@ export function caseMetadataIssues(input: {
   structureSignature?: unknown;
   bodyMechanism?: unknown;
 }): string[] {
-  const issues = visualGrammarIssues(input.visualGrammar);
-  issues.push(...structureSignatureIssues(input.structureSignature));
-  const bodyMechanism = typeof input.bodyMechanism === "string" ? input.bodyMechanism.trim() : "";
-  if (bodyMechanism.length < 24) {
-    issues.push("正文承接机制至少需要说明首屏之后章节如何继续展开");
-  }
-  return issues;
+  const review = caseMetadataReview(input);
+  return [...review.errors, ...review.warnings];
 }
 
 export function normalizeVisualGrammar(value: unknown): VisualGrammar | null {
-  if (visualGrammarIssues(value).length) return null;
+  if (visualGrammarReview(value).errors.length) return null;
   const record = value as Record<string, unknown>;
   return Object.fromEntries(
     VISUAL_GRAMMAR_FIELDS.map((field) => [field.key, String(record[field.key]).trim()]),

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   caseMetadataIssues,
+  caseMetadataReview,
+  structureSignatureReview,
   structureSignatureIssues,
+  visualGrammarReview,
   visualGrammarIssues,
 } from "../../src/lib/case-metadata";
 
@@ -51,5 +54,33 @@ describe("case metadata quality gate", () => {
   it("rejects a structure signature without three comparable steps", () => {
     expect(structureSignatureIssues("大图 > 正文")).not.toEqual([]);
     expect(structureSignatureIssues("wide-entry > body > close")).toEqual([]);
+  });
+
+  it("keeps weak visual phrasing as a warning when all required fields are present", () => {
+    const review = visualGrammarReview({ ...grammar, imageTreatment: "图片放在正文里，尺寸合适。" });
+    expect(review.errors).toEqual([]);
+    expect(review.warnings).toContain("图像处理必须写明至少两种图幅、裁切、边框或图注关系");
+  });
+
+  it("keeps a short structure signature as a warning instead of a hard failure", () => {
+    expect(structureSignatureReview("大图 > 正文")).toEqual({
+      errors: [],
+      warnings: ["结构签名至少要用三个可比较的阅读步骤描述"],
+    });
+  });
+
+  it("still treats missing fields and unknown visual grammar keys as hard errors", () => {
+    const missing = visualGrammarReview({ ...grammar, firstScreenAction: "" });
+    expect(missing.errors).toContain("视觉语法缺少 首屏独立动作");
+    expect(caseMetadataReview({
+      visualGrammar: { ...grammar, extraField: "x" },
+      structureSignature: "wide-entry > body > close",
+      bodyMechanism: "首屏以路线建立行程，后文用每站照片和事实带继续同一条移动路径。",
+    }).errors).toContain("视觉语法含未知字段 extraField");
+    expect(caseMetadataIssues({
+      visualGrammar: grammar,
+      structureSignature: "wide-entry > body > close",
+      bodyMechanism: "首屏以路线建立行程，后文用每站照片和事实带继续同一条移动路径。",
+    })).toEqual([]);
   });
 });

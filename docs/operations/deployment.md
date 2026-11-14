@@ -162,7 +162,7 @@ Render Free 不是当前稳定环境，只作为备用演示。完全免费的�
 - 根分区磁盘 85% 阈值。
 - 最新备份是否存在且不超过 26 小时。
 
-配置飞书机器人后，告警和恢复通知会发送到群；未配置时脚本会明确输出跳过原因。后续仍应补充 5xx 率、P95 延迟、硬检查 ERROR、导出失败和审计写入失败的指标监控。
+飞书自定义机器人已接入并完成送达测试，告警和恢复通知会发送到群；webhook 只保存在服务器 `600` 权限文件中。变更机器人后必须重跑 `test-alert.sh`。后续仍应补充 5xx 率、P95 延迟、硬检查 ERROR、导出失败和审计写入失败的指标监控。
 
 配置和验证步骤：
 
@@ -181,5 +181,9 @@ install -m 600 deploy/training/backup.env.example /etc/wecraft-training/backup.e
 # 编辑 RCLONE_REMOTE，例如 wecraft-training-backup:wecraft-training
 bash scripts/ops/backup-postgres.sh
 cat /var/lib/wecraft-training/last-offsite-copy
+bash scripts/ops/restore-drill-offsite.sh
+cat /var/lib/wecraft-training/last-restore-drill
 ```
+
+备份、最小权限、生命周期、密钥轮换和恢复边界见[异地备份运行手册](offsite-backup.md)。
 

@@ -17,7 +17,13 @@ backup_file="${1:-$BACKUP_DIR/latest.dump}"
 [[ -r "$backup_file" ]] || { echo "backup not readable: $backup_file"; exit 2; }
 
 if [[ -r "$backup_file.sha256" ]]; then
-  sha256sum -c "$backup_file.sha256"
+  expected_hash="$(awk 'NR == 1 { print $1 }' "$backup_file.sha256")"
+  actual_hash="$(sha256sum "$backup_file" | awk '{ print $1 }')"
+  [[ "$expected_hash" =~ ^[0-9a-f]{64}$ && "$actual_hash" == "$expected_hash" ]] || {
+    echo "backup checksum mismatch: $backup_file"
+    exit 1
+  }
+  echo "backup_sha256=ok hash=$actual_hash"
 fi
 docker exec -i "$DB_CONTAINER" pg_restore -l < "$backup_file" >/dev/null
 

@@ -53,14 +53,16 @@
 
 - 每日 `pg_dump -Fc` 全量备份，保留 30 天；关键发布前由 `release.sh` 额外备份。
 - 每个备份生成 SHA-256，并用 `pg_restore -l` 校验归档可读；当前路径为 `/var/backups/wecraft-training`。
-- 恢复演练只创建临时数据库，验证至少一个 Workspace 后立即删除；新脚本会写入 `/var/lib/wecraft-training/last-restore-drill`，用于 7 天新鲜度门禁。
-- 本机备份不能替代灾备。配置 `RCLONE_REMOTE` 后，备份脚本复制并反向校验对象，成功时写入 `/var/lib/wecraft-training/last-offsite-copy`；未配置时输出 `offsite_copy=skipped`。
+- 恢复演练只创建临时数据库，验证至少一个 Workspace 后立即删除；异地演练会写入 `/var/lib/wecraft-training/last-restore-drill`，用于 7 天新鲜度门禁。
+- 备份会复制到独立私有 OSS Bucket，并用 `rclone check` 反向校验 dump 与校验和；成功时写入 `/var/lib/wecraft-training/last-offsite-copy`。
+- 灾备演练必须使用 `restore-drill-offsite.sh` 从 OSS 重新下载最新完整备份并校验 SHA-256；`restore-drill.sh` 只用于本机归档诊断，不能作为灾备门禁。演练状态必须为 7 天内、`result=ok` 且 `source=offsite:`。
+- 2026-11-14 17:36 已完成异地复制，17:41 已完成异地下载与隔离恢复；恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计，临时库与临时文件已删除。
 - 托管 PostgreSQL 开启 PITR/WAL 归档，RPO 建议不超过 15 分钟。
 - 每季度至少一次从备份恢复到隔离环境，并运行只读校验。
 
 ```bash
 bash /opt/wecraft-training/scripts/ops/backup-postgres.sh
-bash /opt/wecraft-training/scripts/ops/restore-drill.sh
+bash /opt/wecraft-training/scripts/ops/restore-drill-offsite.sh
 cat /var/lib/wecraft-training/last-offsite-copy
 cat /var/lib/wecraft-training/last-restore-drill
 ```

@@ -34,11 +34,11 @@
 - 登录失败按账号 8 次、IP 30 次阻断 15 分钟，返回 `429`；限流键只保存 SHA-256，不落明文邮箱或 IP。
 - 并发创建数据集的编号冲突已修复；编号由 PostgreSQL 原子序列分配，并有 8 路并发 E2E 回归。
 - Holdout 支持 2–3 名独立评审，裁决人不得兼任评审，候选制作人不得参与同组评审或裁决；结果按固定候选 A/B 归一化。
-- 每日 `02:30` 自动备份 PostgreSQL，30 天保留，备份带 SHA-256 和 `pg_restore` 可读性校验；已在隔离数据库完成一次恢复演练。
-- 每 5 分钟检查健康、数据库、容器、磁盘、发布 revision、Caddy 路由和备份新鲜度；飞书 webhook 尚未配置，告警仍只写本机日志。
+- 每日 `02:30` 自动备份 PostgreSQL，30 天保留，备份带 SHA-256 和 `pg_restore` 可读性校验；17:36 已写入深圳 OSS 异地副本，17:41 已从 OSS 重新下载并在隔离库恢复验证（2 个 Workspace、5 个案例、2 个候选、53 条审计）。
+- 每 5 分钟检查健康、数据库、容器、磁盘、发布 revision、Caddy 路由和备份新鲜度；飞书自定义机器人已配置，16:33 测试消息送达并写入 `last-alert-test`。
 - 所有 JSON API 统一限制 16MB 请求体，超限返回 `413 PAYLOAD_TOO_LARGE`；截图原文件仍限制 8MB。
 - 发布已改用固定 revision 镜像、共享生产发布锁、发布前备份和发布后公网校验；当前镜像另保存为带 SHA-256 的 zstd 归档，可在本地镜像被清理后恢复。
-- 共用主机的并发构建曾在 15:03、15:22、15:30、15:33 多次触发内存保护，并在 15:29 清理训练容器与镜像，造成训练站点 502。当前已恢复；正式生产必须迁移独立主机/Docker daemon，或在发布窗口内由双方显式串行并值守。
+- 共用主机的并发构建曾在 15:03、15:22、15:30、15:33 多次触发内存保护，并在 15:29 清理训练容器与镜像；17:04 训练容器又被外部停止一次，均造成训练站点 502。当前已恢复；正式生产必须迁移独立主机/Docker daemon，或在发布窗口内由双方显式串行并值守。
 
 ## 隔离边界
 
@@ -143,17 +143,19 @@ bash scripts/ops/release.sh <immutable-revision-tag>
 
 ## 备份
 
-当前使用命名卷持久化 PostgreSQL，并已安装每日自动备份：
+当前使用命名卷持久化 PostgreSQL，并已安装每日自动备份和 OSS 异地副本：
 
 ```bash
 systemctl list-timers 'wecraft-training-*' --all
 bash /opt/wecraft-training/scripts/ops/backup-postgres.sh
-bash /opt/wecraft-training/scripts/ops/restore-drill.sh /var/backups/wecraft-training/latest.dump
+cat /var/lib/wecraft-training/last-offsite-copy
+bash /opt/wecraft-training/scripts/ops/restore-drill-offsite.sh
+cat /var/lib/wecraft-training/last-restore-drill
 ```
 
-备份写入 `/var/backups/wecraft-training`，默认保留 30 天；恢复演练会创建临时数据库、校验至少一个 Workspace 后立即删除，不触碰生产库。
+本机备份写入 `/var/backups/wecraft-training`，默认保留 30 天；异地副本写入私有 OSS Bucket `wecraft-training-backup-20261114` 的 `wecraft-training/` 前缀，生命周期 30 天后删除对象和碎片。配置、最小权限、密钥轮换和故障边界见[异地备份运行手册](offsite-backup.md)。
 
-仍需配置 `RCLONE_REMOTE` 完成异地副本。当前 `backup.env` 留空时脚本会明确输出 `offsite_copy=skipped`，不能把本机备份视为灾备完成。配置后必须验证 `last-offsite-copy` 为 26 小时内且 `result=ok`。
+恢复演练会从 rclone remote 重新下载最新 dump，先对下载文件计算 SHA-256 并比对远端清单，再创建临时数据库、校验至少一个 Workspace 后立即删除，不触碰生产库。`last-restore-drill` 必须为 7 天内、`result=ok` 且 `source` 以 `offsite:` 开头。
 
 数据库密码、会话密钥和账号密码只存放在服务器 `/opt/wecraft-training/deploy/training/.env` 与受控密钥库，不写入 Git 或公开飞书文档。
 
@@ -164,19 +166,19 @@ systemctl status wecraft-training-monitor.timer --no-pager
 bash /opt/wecraft-training/scripts/ops/monitor.sh
 ```
 
-监控每 5 分钟检查 HTTPS 健康、数据库、应用/数据库容器状态、磁盘 85% 阈值、备份 26 小时新鲜度、发布 revision 和训练平台 Caddy 路由。将飞书自定义机器人 webhook 写入 `/etc/wecraft-training/monitor.env` 的 `ALERT_WEBHOOK_URL` 后，告警才会实际送达；webhook 文件必须保持 `600`，不得提交到 Git。配置后执行：
+监控每 5 分钟检查 HTTPS 健康、数据库、应用/数据库容器状态、磁盘 85% 阈值、备份 26 小时新鲜度、发布 revision 和训练平台 Caddy 路由。飞书自定义机器人已接入，webhook 只保存在 `/etc/wecraft-training/monitor.env`（权限 `600`），不得提交到 Git。变更 webhook 或轮换机器人后执行：
 
 ```bash
 bash scripts/ops/test-alert.sh
 cat /var/lib/wecraft-training/last-alert-test
 ```
 
-成功必须同时看到 `ALERT_TEST_OK` 和飞书群中的测试消息。
+成功必须同时看到 `ALERT_TEST_OK` 和飞书群中的测试消息；2026-11-14 16:33 已完成一次送达验证。
 
 ## 已知边界
 
 - 主入口依赖 `zer-go.cn` 的 `wecraft-training` A 记录；修改 DNS 时必须保持指向 `39.105.45.154`，并同步更新 `APP_URL` 与 Caddy Host。旧 `sslip.io` 地址仍作为兼容别名保留。
 - 当前未启用 MFA、企业 SSO、WAF 或 IP 允许列表；邮箱登录已启用失败节流和健康监控，但仍应通过受控渠道分发地址。
-- 自动备份目前只在本机；异地备份和飞书告警送达仍需配置外部凭据。
+- 本机与 OSS 异地备份、飞书告警均已闭环；异地 Bucket 与训练主机仍处于同一云账号，尚未实现跨云灾备。
 - 公网试点空间当前没有真实业务数据；原虚构演示数据只保留在隔离 Workspace，不用于正式验收。
 - 部署健康与功能冒烟通过，不等于模型训练已经产生可验证的设计提升。训练效果必须用 HOLD OUT 实验、盲评一致性和可复现证据单独验收。

@@ -104,10 +104,10 @@ if [[ "$MODE" == "pilot" ]]; then
     block "offsite_copy" "26 小时内没有成功异地复制记录"
   fi
 
-  if [[ -r "$STATE_DIR/last-restore-drill" ]] && find "$STATE_DIR/last-restore-drill" -mmin -10080 -print -quit | grep -q . && grep -q 'result=ok' "$STATE_DIR/last-restore-drill"; then
+  if [[ -r "$STATE_DIR/last-restore-drill" ]] && find "$STATE_DIR/last-restore-drill" -mmin -10080 -print -quit | grep -q . && grep -q 'result=ok' "$STATE_DIR/last-restore-drill" && grep -Eq '^source=offsite:' "$STATE_DIR/last-restore-drill"; then
     pass "restore_drill" "$(head -n 1 "$STATE_DIR/last-restore-drill")"
   else
-    block "restore_drill" "7 天内没有成功恢复演练记录"
+    block "restore_drill" "7 天内没有从异地副本完成的成功恢复演练"
   fi
 
   demo_seed="$(sed -n 's/^DEMO_SEED_IF_EMPTY=//p' "$APP_ENV_FILE" 2>/dev/null | head -n 1)"
@@ -115,7 +115,7 @@ if [[ "$MODE" == "pilot" ]]; then
 
   pilot_workspace="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select id||'|'||name from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE' limit 1;" 2>/dev/null || true)"
   if [[ -n "$pilot_workspace" ]]; then pass "pilot_workspace" "$PILOT_WORKSPACE_SLUG"; else block "pilot_workspace" "active workspace $PILOT_WORKSPACE_SLUG not found"; fi
-  counts_sql="with ws as (select id from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE'), pilot as (select (select id from ws) as id) select (select count(*) from \"User\" where \"isActive\"=true and email like '%@example.test'), (select count(distinct u.id) from \"User\" u join \"Membership\" m on m.\"userId\"=u.id join pilot on pilot.id=m.\"workspaceId\" where u.\"isActive\"=true and m.status='ACTIVE' and u.email not like '%@example.test'), (select count(*) from \"Case\" where status='ELIGIBLE' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Counterexample\" where status='APPROVED' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Brief\" where purpose<>'CASE_SOURCE' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from (select archetype from \"Case\" where status='ELIGIBLE' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot) group by archetype having count(*)>=3) covered), (select count(*) from \"Case\" c join \"AuthorizationGrant\" g on g.\"subjectType\"='CASE' and g.\"subjectId\"=c.id where c.status='ELIGIBLE' and c.\"deletedAt\" is null and c.\"workspaceId\"=(select id from pilot) and g.\"evidenceStatus\"='VERIFIED'), (select count(*) from \"Case\" where \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Case\" c join \"CaseVersion\" v on v.\"caseId\"=c.id and v.version=c.\"currentVersion\" where c.\"deletedAt\" is null and c.\"workspaceId\"=(select id from pilot) and (select count(distinct r.\"reviewerId\") from \"CaseReview\" r where r.\"caseVersionId\"=v.id and r.status='SUBMITTED')>=2), (select count(distinct p.id) from \"ExperimentPair\" p join \"Experiment\" e on e.id=p.\"experimentId\" join \"ExperimentBrief\" eb on eb.\"experimentId\"=e.id join \"Brief\" b on b.id=eb.\"briefId\" where e.\"workspaceId\"=(select id from pilot) and e.status='CLOSED' and b.split='HOLDOUT' and p.status='COMPLETED');"
+  counts_sql="with ws as (select id from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE'), pilot as (select (select id from ws) as id) select (select count(*) from \"User\" where \"isActive\"=true and email like '%@example.test'), (select count(distinct u.id) from \"User\" u join \"Membership\" m on m.\"userId\"=u.id join pilot on pilot.id=m.\"workspaceId\" where u.\"isActive\"=true and m.status='ACTIVE' and u.email not like '%@example.test'), (select count(*) from \"Case\" where status='ELIGIBLE' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Counterexample\" where status='APPROVED' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Brief\" where purpose<>'CASE_SOURCE' and status='READY' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from (select archetype from \"Case\" where status='ELIGIBLE' and \"deletedAt\" is null and \"workspaceId\"=(select id from pilot) group by archetype having count(*)>=3) covered), (select count(*) from \"Case\" c join \"AuthorizationGrant\" g on g.\"subjectType\"='CASE' and g.\"subjectId\"=c.id where c.status='ELIGIBLE' and c.\"deletedAt\" is null and c.\"workspaceId\"=(select id from pilot) and g.\"evidenceStatus\"='VERIFIED' and g.\"canUseForTraining\"=true and (g.\"expiresAt\" is null or g.\"expiresAt\">now())), (select count(*) from \"Case\" where \"deletedAt\" is null and \"workspaceId\"=(select id from pilot)), (select count(*) from \"Case\" c join \"CaseVersion\" v on v.\"caseId\"=c.id and v.version=c.\"currentVersion\" where c.\"deletedAt\" is null and c.\"workspaceId\"=(select id from pilot) and (select count(distinct r.\"reviewerId\") from \"CaseReview\" r where r.\"caseVersionId\"=v.id and r.status='SUBMITTED')>=2), (select count(distinct p.id) from \"ExperimentPair\" p join \"Experiment\" e on e.id=p.\"experimentId\" join \"ExperimentBrief\" eb on eb.\"experimentId\"=e.id join \"Brief\" b on b.id=eb.\"briefId\" where e.\"workspaceId\"=(select id from pilot) and e.status='CLOSED' and b.split='HOLDOUT' and p.status='COMPLETED' and (select count(distinct pc.\"reviewerId\") from \"PairwiseComparison\" pc where pc.\"experimentPairId\"=p.id and pc.status='SUBMITTED')>=3);"
   counts="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F '|' -c "$counts_sql" 2>/dev/null || true)"
   if [[ -z "$counts" ]]; then
     block "database_query" "无法读取 Pilot 数据门禁"
@@ -129,7 +129,20 @@ if [[ "$MODE" == "pilot" ]]; then
     [[ "$covered_archetypes" -ge 9 ]] && pass "data_archetypes" "$covered_archetypes / 9" || block "data_archetypes" "$covered_archetypes / 9"
     [[ "$eligible_cases" -gt 0 && "$authorization_complete" -ge "$eligible_cases" ]] && pass "data_authorization" "$authorization_complete / $eligible_cases" || block "data_authorization" "$authorization_complete / $eligible_cases"
     [[ "$total_cases" -gt 0 && "$reviewed_cases" -ge "$total_cases" ]] && pass "data_reviews" "$reviewed_cases / $total_cases" || block "data_reviews" "$reviewed_cases / $total_cases"
-    [[ "$holdout_pairs" -ge 30 ]] && pass "holdout_pairs" "$holdout_pairs / 30" || block "holdout_pairs" "$holdout_pairs / 30"
+    [[ "$holdout_pairs" -ge 30 ]] && pass "holdout_pairs" "$holdout_pairs / 30 (3 reviewers)" || block "holdout_pairs" "$holdout_pairs / 30 (3 reviewers)"
+  fi
+
+  roles_sql="with pilot as (select id from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE'), active_users as (select distinct u.id, r.code from \"User\" u join \"Membership\" m on m.\"userId\"=u.id and m.\"workspaceId\"=(select id from pilot) and m.status='ACTIVE' join \"MemberRole\" mr on mr.\"membershipId\"=m.id join \"Role\" r on r.id=mr.\"roleId\" where u.\"isActive\"=true and u.email not like '%@example.test') select (select count(distinct id) from active_users where code='DESIGN_LEAD'), (select count(distinct id) from active_users where code='ANNOTATOR'), (select count(distinct id) from active_users where code='AI_ENGINEER'), (select count(distinct id) from active_users where code='CONTENT_LEAD');"
+  role_counts="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F '|' -c "$roles_sql" 2>/dev/null || true)"
+  if [[ -z "$role_counts" ]]; then
+    block "role_coverage" "无法读取 Pilot 角色覆盖"
+  else
+    IFS='|' read -r design_leads annotators ai_engineers content_leads <<<"$role_counts"
+    if [[ "$design_leads" -ge 1 && "$annotators" -ge 2 && "$ai_engineers" -ge 1 && "$content_leads" -ge 1 ]]; then
+      pass "role_coverage" "design_lead=$design_leads annotators=$annotators ai_engineer=$ai_engineers content_lead=$content_leads"
+    else
+      block "role_coverage" "design_lead=$design_leads/1 annotators=$annotators/2 ai_engineer=$ai_engineers/1 content_lead=$content_leads/1"
+    fi
   fi
 fi
 

@@ -1,7 +1,7 @@
 # 正式投用切换清单
 
 > 更新日期：2026-11-14
-> 当前判断：**受控试点环境已就绪，正式生产仍为 NO-GO。**
+> 当前判断：**技术运行与灾备已闭环，受控试点可继续；正式生产仍为 NO-GO，剩余阻断集中在真实数据、独立账号/评审和业务签收。**
 > 本清单只记录可复核的证据，不以“容器健康”替代“训练有效”，也不以“演示数据”替代真实业务数据。
 
 ## 1. 当前运行边界
@@ -16,30 +16,31 @@
 | 演示种子 | `DEMO_SEED_IF_EMPTY=0`，空库不会自动恢复演示数据 |
 | 数据存储 | PostgreSQL 16，文件使用 `STORAGE_DRIVER=database` |
 | 发布方式 | 固定 revision 镜像、共享发布锁、发布前备份、发布后 preflight |
-| 当前发布 | `20261114T1620-6922dd1`，应用与数据库健康，运行时 preflight 为 0 阻断 |
+| 当前发布 | `20261114T1637-c78c42c`，应用与数据库健康；runtime preflight 为 0 阻断，pilot preflight 为 8 阻断 |
 
 正式试点不得继续使用演示账号。Owner 当前临时持有多个角色，只用于初始化；开始真实双评前必须创建独立账号并完成职责分离。
 
 ## 2. 已完成的技术证据
 
 - 公网健康接口返回 `ok: true`、`database: "ok"`，revision 与 `/var/lib/wecraft-training/last-release` 一致。
-- 应用与 PostgreSQL 容器为 `healthy`，Caddy 训练路由存在，磁盘低于阻断阈值。
-- `wecraft-training-backup.timer` 与 `wecraft-training-monitor.timer` 已启用。
+- 应用与 PostgreSQL 容器为 `healthy`，Caddy 训练路由存在；磁盘 83%（低于 85% 阻断阈值，但仍需保持容量监控）。
+- `wecraft-training-backup.timer` 与 `wecraft-training-monitor.timer` 已启用；飞书告警测试于 2026-11-14 16:33 送达并记录 `result=ok`。
 - 发布脚本会拒绝 `DEMO_SEED_IF_EMPTY != 0`，并在发布后运行 runtime preflight。
-- 备份包含 SHA-256、`pg_restore` 可读性校验和 30 天保留策略。
-- 2026-11-14 已在隔离数据库完成恢复演练（2 个 Workspace、5 个案例、53 条审计），并写入 `last-restore-drill`。
+- 本机备份包含 SHA-256、`pg_restore` 可读性校验和 30 天保留策略；异地副本写入独立私有 OSS Bucket `wecraft-training-backup-20261114`（华南 1/深圳），使用最小权限 RAM 用户和 rclone remote。
+- OSS Bucket 已启用服务端加密（OSS 完全托管 AES256）、阻止公共访问，并为 `wecraft-training/` 前缀配置 30 天对象删除和 30 天碎片清理生命周期规则。
+- 2026-11-14 17:36 备份脚本已成功写入异地副本，`/var/lib/wecraft-training/last-offsite-copy` 为 `result=ok`；17:41 从 OSS 重新下载最新 dump，SHA-256 与远端清单一致，并在隔离库恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计，临时库已删除。
 - 单元测试、类型检查和生产构建通过；核心 E2E 曾通过 13/13，覆盖双评、Holdout、硬检查、导出、权限与审计。
 - 正式试点 Workspace 已创建，演示账号已停用，审计中有初始化记录。
-- `preflight.sh --pilot` 当前为 11 个阻断：告警、异地备份、案例、反例、黄金 Brief、主型、授权、双评和 Holdout；运行时检查为 0 阻断。
+- `preflight.sh --pilot` 当前为 8 个阻断：角色覆盖、案例、反例、黄金 Brief、主型、授权、双评和 Holdout；运行时检查和运维闭环为 0 阻断。角色覆盖要求独立的 DESIGN_LEAD、2 名 ANNOTATOR、AI_ENGINEER 和 CONTENT_LEAD；当前只有 1 个真实账号，且 ANNOTATOR 为 1/2。
 
 ## 3. 正式投用前仍为阻断项
 
 | 阻断项 | 负责人 | 关闭证据 | 当前状态 |
 | --- | --- | --- | --- |
-| 飞书告警送达 | 平台运维 | 自定义机器人 webhook 写入 `600` 权限文件，`test-alert.sh` 返回 `ALERT_TEST_OK` | 未配置 |
-| 异地备份 | 平台运维 + 数据负责人 | 独立 OSS/S3/R2 bucket 与专用 rclone remote，`backup-postgres.sh` 输出 `offsite_copy=ok` | 未配置 |
-| 恢复演练证据 | 平台运维 | 执行 `restore-drill.sh`，生成 7 天内有效的 `last-restore-drill` | 已完成（2026-11-14 16:19） |
-| 独立团队账号 | OWNER | 至少建立独立的 DESIGN_LEAD、ANNOTATOR（2 人以上）和 AI_ENGINEER 账号 | 未完成 |
+| 飞书告警送达 | 平台运维 | 自定义机器人 webhook 写入 `600` 权限文件，`test-alert.sh` 返回 `ALERT_TEST_OK` | 已完成（2026-11-14 16:33） |
+| 异地备份 | 平台运维 + 数据负责人 | 独立 OSS Bucket 与专用 rclone remote，`backup-postgres.sh` 输出 `offsite_copy=ok` | 已完成（2026-11-14 17:36） |
+| 恢复演练证据 | 平台运维 | 执行 `restore-drill-offsite.sh`，生成 7 天内有效的 `last-restore-drill` | 已完成（2026-11-14 17:41，异地下载） |
+| 独立团队账号 | OWNER | 至少建立独立的 DESIGN_LEAD、ANNOTATOR（2 人以上）、AI_ENGINEER 和 CONTENT_LEAD 账号 | 1 个真实账号；design_lead=1/1、annotators=1/2、ai_engineer=1/1、content_lead=1/1 |
 | 真实优质案例 | DESIGN_LEAD | 30 个 `ELIGIBLE` 案例，9 个主型各至少 3 个 | 0 / 30 |
 | 已批准反例 | DESIGN_LEAD | 10 个 `APPROVED` 反例 | 0 / 10 |
 | 黄金 Brief | CONTENT_LEAD | 60 个非 `CASE_SOURCE` Brief | 0 / 60 |
@@ -60,7 +61,7 @@ curl -fsS https://wecraft-training.zer-go.cn/api/v1/health
 systemctl list-timers 'wecraft-training-*' --all --no-pager
 ```
 
-`preflight.sh --pilot` 必须输出 `SUMMARY mode=pilot blockers=0`。只要仍有 `BLOCK`，就只能在隔离空间做受控试点，不能对外宣布正式生产。
+`preflight.sh --pilot` 必须输出 `SUMMARY mode=pilot blockers=0`。只要仍有 `BLOCK`，就只能在隔离空间做受控试点，不能对外宣布正式生产；当前门禁还包括独立角色覆盖和三名评审的 Holdout 完整性。
 
 ### 4.1 告警测试
 
@@ -75,29 +76,24 @@ cat /var/lib/wecraft-training/last-alert-test
 
 ### 4.2 异地备份
 
-使用独立于生产 WeCraft 的对象存储 bucket 和最小权限凭据，不在训练主机上复用生产密钥：
+已于 2026-11-14 完成。使用独立于 WeCraft 生产对象的私有 OSS Bucket、最小权限 RAM 用户和训练专用 rclone remote；不要复用生产密钥。日常验证命令：
 
 ```bash
-cat >/etc/wecraft-training/backup.env <<'EOF'
-RCLONE_REMOTE=wecraft-training-backup:wecraft-training
-RETENTION_DAYS=30
-EOF
-chmod 600 /etc/wecraft-training/backup.env
 command -v rclone
 bash /opt/wecraft-training/scripts/ops/backup-postgres.sh
 cat /var/lib/wecraft-training/last-offsite-copy
 ```
 
-成功标准：脚本输出 `offsite_copy=ok`，状态文件包含 `result=ok`，并从另一台机器或对象存储控制台验证备份文件可读取。
+成功标准：脚本输出 `offsite_copy=ok`，状态文件包含 `result=ok`。Bucket 配置、最小权限边界、生命周期和密钥轮换步骤见[异地备份运行手册](offsite-backup.md)。
 
 ### 4.3 恢复演练
 
 ```bash
-bash /opt/wecraft-training/scripts/ops/restore-drill.sh
+bash /opt/wecraft-training/scripts/ops/restore-drill-offsite.sh
 cat /var/lib/wecraft-training/last-restore-drill
 ```
 
-脚本只创建临时恢复数据库，验证至少一个 Workspace 后删除，不触碰生产库。
+脚本从 rclone remote 重新下载最新的 dump 和 SHA-256，先校验下载文件的真实哈希，再创建临时恢复数据库，验证至少一个 Workspace 后删除，不触碰生产库。`last-restore-drill` 的 `source` 必须指向 `offsite:`，不能只验证本机备份。
 
 ### 4.4 正式数据与实验
 
@@ -123,10 +119,10 @@ cat /var/lib/wecraft-training/last-restore-drill
 
 只有以下五类签收同时满足，才可把状态改为“正式投入试点”：
 
-- [ ] 技术发布、告警与恢复演练：平台运维。
+- [x] 技术发布、告警与恢复演练：平台运维（2026-11-14）。
 - [ ] 授权、保留期和删除流程：OWNER/法务。
 - [ ] 数据量与双评质量：DESIGN_LEAD。
 - [ ] Holdout 实验与统计结论：AI_ENGINEER。
 - [ ] 业务范围、SLA、退出条件：业务负责人。
 
-正式生产还需要独立运行边界或书面风险接受。当前共用 ECS/Docker daemon 已在 2026-11-14 发生训练容器被并发构建清理的事故，不能把“当前健康”视为已完成隔离。
+正式生产还需要独立运行边界或书面风险接受。当前共用 ECS/Docker daemon 已在 2026-11-14 发生训练容器被并发构建清理和外部停止的事故，不能把“当前健康”视为已完成隔离。

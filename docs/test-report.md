@@ -31,7 +31,7 @@
 | 命令 | 结果 | 说明 |
 | --- | --- | --- |
 | `npm run typecheck` | 通过 | `tsc --noEmit`，无类型错误 |
-| `npm test` | 通过 | 11 个测试文件，43/43 单元测试通过，耗时约 2.5 秒 |
+| `npm test` | 通过 | 11 个测试文件，48/48 单元测试通过，耗时约 2.5 秒 |
 | `npm run build` | 通过 | Next.js 生产构建成功，29 个路由完成静态/动态产物生成 |
 | `npm run db:seed` | 通过 | 重建演示 Workspace、账号、Brief、案例、反例、实验和数据集 |
 | `npm run test:e2e` | 通过 | 13/13 Playwright E2E 通过，耗时约 26 秒 |
@@ -103,19 +103,19 @@
 
 - Dockerfile 和 Docker Compose 已在 Ubuntu 22.04 稳定公网 Stack 实测；本次 Windows 开发机未运行容器，GitHub Actions 尚未构建镜像。
 - 未执行压力测试、可访问性扫描和真实飞书 OAuth/消息集成测试；已覆盖 8 路并发创建数据集的编号回归。
-- 已在稳定公网完成 PostgreSQL 备份；异地备份和本次新脚本的隔离恢复演练仍待完成。
+- 已在稳定公网完成 PostgreSQL 本机备份、OSS 异地复制，并从 OSS 重新下载完成隔离恢复演练；尚未执行压力测试和跨云灾备演练。
 - 当前 `npm audit` 报告 13 个漏洞：6 moderate、7 high、0 critical。主要修复需要 Next.js、Prisma、Zod、Archiver 大版本升级，未在 MVP 收口阶段强行升级。
 - `sanitize-html` 对允许 `style` 标签给出安全警告；平台通过 CSP、URL 清洗和 iframe 隔离降低风险，但样式层仍需在独立渲染域中长期加固。
 - Chromium 硬检查使用 `--no-sandbox` 参数，隔离边界依赖容器/虚拟机；生产化应迁移到独立 runner 并加强进程隔离。
 
 ## 9. 2026-11-14 生产化补充记录
 
-- 公网 revisions 已通过健康接口与 `/var/lib/wecraft-training/last-release` 对齐；`20261114T1600-2f61ce3` 和最终 `20261114T1620-6922dd1` 均返回 `RELEASE_OK`，应用和 PostgreSQL 容器健康。
+- 公网当前 revision 为 `20261114T1637-c78c42c`，已通过健康接口与 `/var/lib/wecraft-training/last-release` 对齐；`20261114T1600-2f61ce3`、`20261114T1620-6922dd1` 为历史发布，均曾返回 `RELEASE_OK`。当前应用和 PostgreSQL 容器健康。
 - 正式试点 Workspace `wecraft-pilot` 已创建，8 个演示账号已停用，`DEMO_SEED_IF_EMPTY=0`；演示 Workspace 仅隔离保留。
 - 本机备份已加入 SHA-256 校验、`pg_restore` 可读性检查和 30 天保留；`preflight.sh` 会把缺失检查、连接失败和数据缺口按 fail-closed 处理。
-- 2026-11-14 16:19 已在隔离库完成恢复演练，恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计；运行时 `preflight` 为 0 阻断，试点门禁仍有 11 项业务/外部配置阻断。
-- 训练平台与 WeCraft 生产仍共用 ECS/Docker daemon，15:48 前后发生训练容器被外部停止/清理的事故；共享锁和固定镜像降低了风险，但正式生产仍要求独立运行边界或书面风险接受。
-- 真实数据、独立评审账号、告警送达、异地备份和 Holdout 结果尚未完成，因此当前状态是“受控试点”，不是“正式生产”。
+- 2026-11-14 16:19 已完成本机隔离恢复演练；17:36 已完成 OSS 异地复制；17:41 已从 OSS 重新下载并恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计，临时库与临时文件已删除。运行时 `preflight` 为 0 阻断，试点门禁仍因业务数据、独立角色、双评和 Holdout 未完成而阻断。
+- 训练平台与 WeCraft 生产仍共用 ECS/Docker daemon，15:48 前后发生训练容器被外部停止/清理、17:04 又发生一次外部 `docker stop`；共享锁和固定镜像降低了风险，但正式生产仍要求独立运行边界或书面风险接受。
+- 告警送达和异地备份已闭环；真实数据、独立评审账号、Holdout 结果、压力测试和业务签收仍未完成，因此当前状态是“可受控试点的生产候选”，不是“正式生产”。
 
 ## 10. 复现方式
 

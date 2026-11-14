@@ -287,6 +287,17 @@ model Workspace {
   storedFiles  StoredFile[]
   authGrants   AuthorizationGrant[]
   legalHolds   LegalHold[]
+  documentCounters DocumentCounter[]
+}
+
+model DocumentCounter {
+  workspaceId String   @db.Uuid
+  prefix      String
+  value       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, prefix])
 }
 
 model User {
@@ -344,6 +355,15 @@ model Session {
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([userId])
+}
+
+model AuthThrottle {
+  key             String   @id @db.VarChar(128)
+  failures        Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  blockedUntil    DateTime?
+  updatedAt       DateTime @updatedAt
+  @@index([updatedAt])
 }
 
 model Invitation {

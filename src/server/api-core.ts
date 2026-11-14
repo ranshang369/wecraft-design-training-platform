@@ -14,6 +14,9 @@ import { DIMENSION_CODES, DIMENSIONS } from "@/lib/constants";
 import { parseScreenshotDataUrl } from "@/lib/image";
 import { aggregateReviewEvidence } from "@/lib/review-aggregation";
 import { INTENT_TAG_IDS, START_POINT_IDS, caseMetadataIssues, inferInternalArchetype } from "@/lib/case-metadata";
+import { experimentReviewerCount } from "@/lib/experiment-protocol";
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from "@/lib/login-guard";
+import { allocateDocumentNumber } from "@/lib/document-number";
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const inviteSchema = z.object({ email: z.string().email(), roleCode: z.enum(["OWNER","ADMIN","DESIGN_LEAD","CONTENT_LEAD","EDITOR","ANNOTATOR","AI_ENGINEER","VIEWER"]) });
@@ -77,7 +80,6 @@ function assertCaseReviewGate(
   if (!evidence.scoresComplete) throw new ApiError(409, "INVALID_STATE", "双评六维分数不完整，不能进入可用案例库");
   if (!evidence.qualityFloorMet) throw new ApiError(409, "INVALID_STATE", "双评中位分未达到训练样例门槛（均分至少 4，单项至少 3）");
 }
-async function nextNo(prefix: string, count: number) { return prefix + "-" + String(count + 1).padStart(4, "0"); }
 function isHoldoutAdmin(ctx: AuthContext) {
   return ctx.roles.includes("OWNER") || ctx.roles.includes("ADMIN");
 }
@@ -143,11 +145,17 @@ export async function handleCore(request: Request, segments: string[], method: s
   const meta = requestMeta(request);
   if (path === "auth/login" && method === "POST") {
     const input = await body(request, loginSchema);
-    const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
-    if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) throw new ApiError(401, "UNAUTHENTICATED", "邮箱或密码错误");
+    const email = input.email.trim().toLowerCase();
+    await assertLoginAllowed(email, meta.ip);
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !user.isActive || !(await bcrypt.compare(input.password, user.passwordHash))) {
+      await recordLoginFailure(email, meta.ip);
+      throw new ApiError(401, "UNAUTHENTICATED", "邮箱或密码错误");
+    }
     const membership = await prisma.membership.findFirst({ where: { userId: user.id, status: "ACTIVE" }, include: { roles: { include: { role: true } } } });
     if (!membership) throw new ApiError(403, "FORBIDDEN", "账号没有可用 Workspace");
     await createSession(user.id, membership.workspaceId, meta.ip ?? undefined, meta.userAgent ?? undefined);
+    await clearLoginFailures(email, meta.ip);
     await appendAudit(prisma, { workspaceId: membership.workspaceId, actorId: user.id, action: "LOGIN", resourceType: "USER", resourceId: user.id, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
     return json({ user: { id: user.id, name: user.name, email: user.email }, roles: membership.roles.map((r) => r.role.code), workspaceId: membership.workspaceId });
   }
@@ -178,7 +186,6 @@ export async function handleCore(request: Request, segments: string[], method: s
 
   const ctx = await requireAuth();
   if (path === "auth/me" && method === "GET") return json({ ...ctx });
-  if (path === "health" && method === "GET") return json({ ok: true });
 
   if (path === "invitations" && method === "GET") {
     assertCapability(can.manageMembers(ctx.roles));
@@ -199,7 +206,7 @@ export async function handleCore(request: Request, segments: string[], method: s
   if (memberRoleMatch && method === "PATCH") {
     assertCapability(can.manageMembers(ctx.roles));
     const membershipId = memberRoleMatch[1];
-    const input = z.object({ roles: z.array(z.enum(["OWNER","ADMIN","DESIGN_LEAD","CONTENT_LEAD","EDITOR","ANNOTATOR","AI_ENGINEER","VIEWER"])).min(1) }).parse(await request.json());
+    const input = await body(request, z.object({ roles: z.array(z.enum(["OWNER","ADMIN","DESIGN_LEAD","CONTENT_LEAD","EDITOR","ANNOTATOR","AI_ENGINEER","VIEWER"])).min(1) }));
     const membership = await prisma.membership.findFirstOrThrow({ where: { id: membershipId, workspaceId: ctx.workspaceId }, include: { roles: { include: { role: true } } } });
     if (!ctx.roles.includes("OWNER") && input.roles.includes("OWNER")) throw new ApiError(403, "FORBIDDEN", "只有 Owner 可以授予 Owner");
     const removingOwner = membership.roles.some((r) => r.role.code === "OWNER") && !input.roles.includes("OWNER");
@@ -231,9 +238,8 @@ export async function handleCore(request: Request, segments: string[], method: s
     assertCapability(can.editBriefs(ctx.roles));
     const input = await body(request, briefSchema);
     if (input.split === "HOLDOUT" && !ctx.roles.includes("OWNER") && !ctx.roles.includes("ADMIN")) throw new ApiError(403, "FORBIDDEN", "只有 Owner/Admin 可以创建 Holdout Brief");
-    const count = await prisma.brief.count({ where: { workspaceId: ctx.workspaceId } });
     const brief = await prisma.$transaction(async (tx) => {
-      const created = await tx.brief.create({ data: { workspaceId: ctx.workspaceId, briefNo: await nextNo("BR", count), title: input.title, purpose: input.purpose, split: input.split, ownerId: ctx.userId } });
+      const created = await tx.brief.create({ data: { workspaceId: ctx.workspaceId, briefNo: await allocateDocumentNumber(tx, ctx.workspaceId, "BR"), title: input.title, purpose: input.purpose, split: input.split, ownerId: ctx.userId } });
       const version = await tx.briefVersion.create({ data: { briefId: created.id, version: 1, manuscriptMarkdown: input.manuscriptMarkdown, images: input.images, targetAudience: input.targetAudience, designCommission: input.designCommission, brandRequirements: input.brandRequirements, prohibitedItems: input.prohibitedItems, userIntent: input.userIntent, hardConstraints: input.hardConstraints ?? [], acceptableArchetypes: input.acceptableArchetypes ?? [], mustAvoid: input.mustAvoid ?? [], rubricTargets: input.rubricTargets ?? {}, acceptanceNotes: input.acceptanceNotes, contentHash: hashObject(input), createdBy: ctx.userId } });
       await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "BRIEF_CREATED", resourceType: "BRIEF", resourceId: created.id, after: { ...input, version: 1 }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return { ...created, currentVersionData: version };
@@ -280,10 +286,9 @@ export async function handleCore(request: Request, segments: string[], method: s
     const metadataIssues = caseMetadataIssues(input);
     if (metadataIssues.length) throw new ApiError(422, "VALIDATION_ERROR", metadataIssues.join("；"));
     const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
-    const count = await prisma.case.count({ where: { workspaceId: ctx.workspaceId } });
     const created = await prisma.$transaction(async (tx) => {
       const archetype = input.archetype ?? inferInternalArchetype(input.startPoints);
-      const caseValue = await tx.case.create({ data: { workspaceId: ctx.workspaceId, caseNo: await nextNo("CA", count), title: input.title, archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
+      const caseValue = await tx.case.create({ data: { workspaceId: ctx.workspaceId, caseNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CA"), title: input.title, archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
       const version = await tx.caseVersion.create({ data: { caseId: caseValue.id, version: 1, applicableConditions: input.applicableConditions, designMechanism: input.designMechanism, bodyMechanism: input.bodyMechanism, startPoints: input.startPoints, intentTags: input.intentTags, structureSignature: input.structureSignature, visualGrammar: input.visualGrammar, antiPatterns: input.antiPatterns, mechanismTags: input.mechanismTags, selfScores: input.selfScores, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
       const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) });
@@ -362,7 +367,7 @@ export async function handleCore(request: Request, segments: string[], method: s
     }
     if (method === "POST" && caseMatch[2] === "assign") {
       assertCapability(can.assignReviews(ctx.roles));
-      const input = z.object({ reviewerIds: z.array(z.string().uuid()).min(2) }).parse(await request.json());
+      const input = await body(request, z.object({ reviewerIds: z.array(z.string().uuid()).min(2) }));
       const tasks = await issueReviewTasks(ctx, caseValue.id, input.reviewerIds);
       await appendAudit(prisma, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_REVIEWERS_ASSIGNED", resourceType: "CASE", resourceId: caseValue.id, after: { reviewerIds: input.reviewerIds }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return json(tasks);
@@ -392,7 +397,7 @@ export async function handleCore(request: Request, segments: string[], method: s
     }
     if (method === "POST" && caseMatch[2] === "resolve") {
       assertCapability(can.adjudicate(ctx.roles));
-      const input = z.object({ outcome: z.enum(["ELIGIBLE","REJECTED","CHANGES_REQUESTED"]), reason: z.string().min(2) }).parse(await request.json());
+      const input = await body(request, z.object({ outcome: z.enum(["ELIGIBLE","REJECTED","CHANGES_REQUESTED"]), reason: z.string().min(2) }));
       if (input.outcome === "ELIGIBLE") {
         const reviews = caseValue.reviews.filter((review) => (
           review.status === "SUBMITTED" && review.caseVersionId === caseValue.versions[0]?.id
@@ -419,9 +424,8 @@ export async function handleCore(request: Request, segments: string[], method: s
     const input = await body(request, counterCreateSchema);
     await assertBriefReference(ctx, input.briefId);
     const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
-    const count = await prisma.counterexample.count({ where: { workspaceId: ctx.workspaceId } });
     const created = await prisma.$transaction(async (tx) => {
-      const item = await tx.counterexample.create({ data: { workspaceId: ctx.workspaceId, counterexampleNo: await nextNo("CE", count), title: input.title, archetype: input.archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
+      const item = await tx.counterexample.create({ data: { workspaceId: ctx.workspaceId, counterexampleNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CE"), title: input.title, archetype: input.archetype, briefId: input.briefId || null, createdBy: ctx.userId, ownerId: ctx.userId } });
       const version = await tx.counterexampleVersion.create({ data: { counterexampleId: item.id, version: 1, failureSummary: input.failureSummary, failureLabels: input.failureLabels, reproductionSteps: input.reproductionSteps, rootCause: input.rootCause, repairSuggestion: input.repairSuggestion, applicableConditions: input.applicableConditions, sourceType: input.sourceType ?? "INTERNAL_ORIGINAL", sourceNote: input.sourceNote, contentHash: hashObject(input), createdBy: ctx.userId } });
       const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + "-375.png", mimeType: screenshot.mimeType, purpose: "COUNTEREXAMPLE_SCREENSHOT", bytes: screenshot.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: item.counterexampleNo + ".html", mimeType: "text/html", purpose: "COUNTEREXAMPLE_HTML", bytes: Buffer.from(input.html) });
@@ -453,7 +457,7 @@ export async function handleCore(request: Request, segments: string[], method: s
     }
     if (method === "POST" && counterMatch[2] === "assign") {
       assertCapability(can.assignReviews(ctx.roles));
-      const input = z.object({ reviewerIds: z.array(z.string().uuid()).min(2) }).parse(await request.json());
+      const input = await body(request, z.object({ reviewerIds: z.array(z.string().uuid()).min(2) }));
       const tasks = await issueCounterexampleReviewTasks(ctx, item.id, input.reviewerIds);
       await appendAudit(prisma, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "COUNTEREXAMPLE_REVIEWERS_ASSIGNED", resourceType: "COUNTEREXAMPLE", resourceId: item.id, after: { reviewerIds: input.reviewerIds }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return json(tasks);
@@ -540,9 +544,12 @@ export async function handleCore(request: Request, segments: string[], method: s
     if (method === "POST" && taskMatch[2] === "arbitrate") {
       if (task.type !== "ARBITRATION" || task.subjectType !== "EXPERIMENT_PAIR" || !task.experimentPairId) throw new ApiError(400, "VALIDATION_ERROR", "该任务不是盲测裁决");
       if (task.assigneeId !== ctx.userId && !can.adjudicate(ctx.roles)) throw new ApiError(403, "FORBIDDEN", "只有裁决人可以提交裁决");
-      const input = z.object({ preference: z.enum(["LEFT","RIGHT","TIE"]), reason: z.string().min(2) }).parse(await request.json());
+      const input = await body(request, z.object({ preference: z.enum(["LEFT","RIGHT","TIE"]), reason: z.string().min(2) }));
       const pair = await prisma.experimentPair.findUniqueOrThrow({ where: { id: task.experimentPairId }, include: { comparisons: { where: { status: "SUBMITTED" } } } });
-      if (pair.comparisons.length < 2) throw new ApiError(409, "INVALID_STATE", "两名评审尚未全部提交");
+      const experiment = await prisma.experiment.findUniqueOrThrow({ where: { id: pair.experimentId } });
+      const requiredReviewers = experimentReviewerCount(experiment.protocol);
+      const submittedReviewers = new Set(pair.comparisons.map((comparison) => comparison.reviewerId)).size;
+      if (submittedReviewers < requiredReviewers) throw new ApiError(409, "INVALID_STATE", `仍有独立评审未提交（${submittedReviewers}/${requiredReviewers}）`);
       const adjudicatedCandidateId = input.preference === "LEFT" ? pair.leftCandidateId : input.preference === "RIGHT" ? pair.rightCandidateId : null;
       const updated = await prisma.$transaction(async (tx) => {
         const changed = await tx.experimentPair.update({ where: { id: pair.id }, data: { adjudicatedPreference: input.preference, adjudicatedCandidateId, adjudicationReason: input.reason, adjudicatedBy: ctx.userId, adjudicatedAt: new Date(), status: "COMPLETED" } });

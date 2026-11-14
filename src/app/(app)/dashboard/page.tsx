@@ -13,6 +13,7 @@ export default function DashboardPage() {
   const roles: string[] = me.data?.roles ?? [];
   const canEditCases = roles.some((role) => ["OWNER", "DESIGN_LEAD", "ANNOTATOR"].includes(role));
   const canCreateDataset = roles.some((role) => ["OWNER", "DESIGN_LEAD", "AI_ENGINEER"].includes(role));
+  const gate = data.dataGate;
   return <>
     <PageHeader title="设计训练工作台" description="一屏查看案例、授权、评审与盲测状态。所有指标都可回溯到具体记录。" />
     {canEditCases || canCreateDataset ? <div className="quick-actions" style={{ gridTemplateColumns: canEditCases && canCreateDataset ? undefined : "1fr" }}>
@@ -25,6 +26,10 @@ export default function DashboardPage() {
       <Stat label="评审完成度" value={formatPercent(data.reviews.rate)} note={data.reviews.complete + " / " + data.reviews.total + " 个案例已完成双评"} />
       <Stat label="硬失败率" value={formatPercent(data.hardChecks.failureRate)} note={data.hardChecks.failed + " / " + data.hardChecks.checked + " 个候选最新硬检查存在 BLOCK"} />
     </div>
+    <section className="card" style={{ marginTop: 16 }}>
+      <div className="card-head"><div><h2>正式试点数据门禁</h2><div className="card-sub">全部通过后才具备真实训练与效果验收的数据基础；不替代备份、告警和业务签收。</div></div><Badge value={gate.ready ? "ELIGIBLE" : "BLOCKED"} /></div>
+      <div className="gate-list">{gate.checks.map((check: any) => <div className="gate-row" key={check.id}><span className={"gate-dot " + (check.passed ? "pass" : "block")} /><span className="gate-label">{check.label}</span><span className="small muted">{check.current} / {check.target}</span><span className="gate-state">{check.passed ? "已通过" : "待补齐"}</span></div>)}</div>
+    </section>
     <div className="grid grid-2" style={{ marginTop: 16 }}>
       <section className="card">
         <div className="card-head"><div><h2>主型覆盖</h2><div className="card-sub">每个主型目标 4 个已具备资格案例，最少 3 个。</div></div><span className="badge gray">9 个主型</span></div>

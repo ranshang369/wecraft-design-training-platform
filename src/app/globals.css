@@ -198,6 +198,13 @@ button, a, input, select, textarea { outline-color: var(--accent); }
 .btn.danger { color: var(--red); border-color: #d7aaaa; }
 .btn.small { min-height: 30px; padding: 4px 9px; font-size: 11px; border-radius: 8px; }
 .btn:disabled { opacity: .46; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.gate-list { display: grid; gap: 8px; }
+.gate-row { display: grid; grid-template-columns: 10px minmax(220px, 1fr) auto 72px; gap: 10px; align-items: center; padding: 9px 10px; border: 1px solid #e8e5df; border-radius: 8px; background: #fbfaf7; }
+.gate-dot { width: 8px; height: 8px; border-radius: 50%; background: #b42318; }
+.gate-dot.pass { background: #15803d; }
+.gate-label { font-size: 13px; color: #282723; }
+.gate-state { font-size: 12px; text-align: right; color: #6b675e; }
 .cta-plus { width: 23px; height: 23px; display: inline-grid; place-items: center; border-radius: 50%; background: rgba(255,255,255,.19); border: 1px solid rgba(255,255,255,.1); font-size: 16px; line-height: 1; }
 
 /* Forms */

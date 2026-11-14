@@ -26,9 +26,12 @@ services:
         max-file: "5"
 
   app:
+    image: wecraft-design-training-app:${APP_REVISION:-latest}
     build:
       context: ../..
       dockerfile: deploy/training/Dockerfile
+      args:
+        APP_REVISION: ${APP_REVISION:-unknown}
     init: true
     restart: unless-stopped
     depends_on:

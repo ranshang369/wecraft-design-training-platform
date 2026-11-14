@@ -223,6 +223,15 @@ async function main() {
     await prisma.datasetItem.create({ data: { workspaceId: W, datasetId: dataset.id, itemType: DatasetItemType.CASE, caseId, split: Split.DEV, status: DatasetItemStatus.READY, snapshot: json(snapshot), contentHash: hash(JSON.stringify(snapshot)), rightsSnapshot: json(grant), sortOrder: index } });
   }
 
+  await prisma.documentCounter.createMany({ data: [
+    { workspaceId: W, prefix: "BR", value: briefDefs.length },
+    { workspaceId: W, prefix: "CA", value: caseDefs.length },
+    { workspaceId: W, prefix: "CE", value: counterDefs.length },
+    { workspaceId: W, prefix: "CD", value: candidateDefs.length },
+    { workspaceId: W, prefix: "EX", value: 1 },
+    { workspaceId: W, prefix: "DS", value: 1 },
+  ] });
+
   await prisma.notification.createMany({ data: [
     { workspaceId: W, recipientId: annotator, type: "TASK_ASSIGNED", title: "你有一个盲测任务待完成", resourceType: "EXPERIMENT_PAIR", resourceId: pair.id, deepLink: "/experiments/" + experiment.id + "/blind", dedupeKey: "seed-blind-" + annotator, status: "PENDING" },
     { workspaceId: W, recipientId: lead, type: "REVIEW_PENDING", title: "案例 CA-0003 仍在评审中", resourceType: "CASE", resourceId: caseDefs[2].id, deepLink: "/cases/" + caseDefs[2].id, dedupeKey: "seed-case-" + lead, status: "PENDING" },

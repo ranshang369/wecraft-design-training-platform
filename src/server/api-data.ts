@@ -7,13 +7,13 @@ import { createExport, validateDataset } from "@/lib/dataset";
 import { readStoredFile } from "@/lib/storage";
 import { safeHtml, PREVIEW_CSP } from "@/lib/sanitize";
 import { DIMENSIONS } from "@/lib/constants";
+import { allocateDocumentNumber } from "@/lib/document-number";
 
 const datasetCreateSchema = z.object({
   name: z.string().min(1), type: z.enum(["TRAIN","EVAL"]),
   caseIds: z.array(z.string().uuid()).default([]), briefIds: z.array(z.string().uuid()).default([]),
   counterexampleIds: z.array(z.string().uuid()).default([]), candidateIds: z.array(z.string().uuid()).default([]),
 });
-async function nextNo(prefix: string, count: number) { return prefix + "-" + String(count + 1).padStart(4, "0"); }
 function isHoldoutAdmin(ctx: AuthContext) {
   return ctx.roles.includes("OWNER") || ctx.roles.includes("ADMIN");
 }
@@ -41,8 +41,29 @@ async function canAccessStoredFile(ctx: AuthContext, fileId: string) {
   }
   const candidateBriefs = file.candidateAssets.length ? await prisma.brief.findMany({ where: { id: { in: file.candidateAssets.map((asset) => asset.candidate.briefId) }, split: "HOLDOUT" }, select: { id: true } }) : [];
   const holdoutCandidateBriefIds = new Set(candidateBriefs.map((brief) => brief.id));
+  const holdoutCandidateIds = new Set(file.candidateAssets.filter((asset) => holdoutCandidateBriefIds.has(asset.candidate.briefId)).map((asset) => asset.candidateId));
+  const assignedHoldoutCandidateIds = new Set<string>();
+  if (!holdoutAdmin && holdoutCandidateIds.size) {
+    const pairs = await prisma.experimentPair.findMany({
+      where: {
+        workspaceId: ctx.workspaceId,
+        experiment: { status: "RUNNING" },
+        OR: [{ leftCandidateId: { in: [...holdoutCandidateIds] } }, { rightCandidateId: { in: [...holdoutCandidateIds] } }],
+      },
+      select: { id: true, leftCandidateId: true, rightCandidateId: true },
+    });
+    const assignedPairIds = new Set((await prisma.reviewTask.findMany({
+      where: { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, type: "BLIND_PAIRWISE", experimentPairId: { in: pairs.map((pair) => pair.id) } },
+      select: { experimentPairId: true },
+    })).map((task) => task.experimentPairId).filter(Boolean));
+    for (const pair of pairs) {
+      if (!assignedPairIds.has(pair.id)) continue;
+      assignedHoldoutCandidateIds.add(pair.leftCandidateId);
+      assignedHoldoutCandidateIds.add(pair.rightCandidateId);
+    }
+  }
   for (const asset of file.candidateAssets) {
-    if (holdoutCandidateBriefIds.has(asset.candidate.briefId) && !holdoutAdmin) continue;
+    if (holdoutCandidateBriefIds.has(asset.candidate.briefId) && !holdoutAdmin && !assignedHoldoutCandidateIds.has(asset.candidateId)) continue;
     if (viewer && !["READY_FOR_BLIND", "IN_BLIND", "COMPLETED"].includes(asset.candidate.status)) continue;
     return true;
   }
@@ -97,6 +118,20 @@ export async function handleData(request: Request, segments: string[], method: s
       if (comparison.preferredCandidateId) preferenceWins.set(comparison.preferredCandidateId, (preferenceWins.get(comparison.preferredCandidateId) ?? 0) + 1);
     }
     const winners = candidates.filter((candidate) => appearances.has(candidate.id)).map((candidate) => { const wins = preferenceWins.get(candidate.id) ?? 0; const shown = appearances.get(candidate.id) ?? 0; return { candidateNo: candidate.candidateNo, title: candidate.title, wins, appearances: shown, winRate: shown ? wins / shown : 0 }; }).sort((a, b) => b.winRate - a.winRate);
+    const readiness = {
+      cases: { current: eligible.length, target: 30 },
+      counterexamples: { current: counterexamples.filter((c) => c.status === "APPROVED").length, target: 10 },
+      goldenBriefs: { current: briefs.filter((b) => b.purpose !== "CASE_SOURCE").length, target: 60 },
+    };
+    const coveredArchetypes = Object.values(coverage).filter((row) => row.approved >= 3).length;
+    const gateChecks = [
+      { id: "eligible_cases", label: "优质案例达到 30 个", current: readiness.cases.current, target: readiness.cases.target, passed: readiness.cases.current >= readiness.cases.target },
+      { id: "counterexamples", label: "已批准反例达到 10 个", current: readiness.counterexamples.current, target: readiness.counterexamples.target, passed: readiness.counterexamples.current >= readiness.counterexamples.target },
+      { id: "golden_briefs", label: "黄金 Brief 达到 60 个", current: readiness.goldenBriefs.current, target: readiness.goldenBriefs.target, passed: readiness.goldenBriefs.current >= readiness.goldenBriefs.target },
+      { id: "archetype_coverage", label: "9 个主型各至少 3 个已批准案例", current: coveredArchetypes, target: 9, passed: coveredArchetypes === 9 },
+      { id: "authorization", label: "已批准案例授权证据 100% 核验", current: authorizationComplete, target: eligible.length, passed: eligible.length > 0 && authorizationComplete === eligible.length },
+      { id: "reviews", label: "全部案例完成两名独立评审", current: reviewComplete, target: cases.length, passed: cases.length > 0 && reviewComplete === cases.length },
+    ];
     return json({
       workspaceId: ctx.workspaceId,
       counts: { briefs: briefs.length, cases: cases.length, counterexamples: counterexamples.length, eligibleCases: eligible.length, candidates: candidates.length, datasets: datasetCount },
@@ -106,7 +141,8 @@ export async function handleData(request: Request, segments: string[], method: s
       consistency: { pairs, agreement: pairs ? agreements / pairs : 0, meanAbsoluteDifference: diffCount ? diffSum / diffCount : null, sampleSufficient: pairs >= 2 },
       hardChecks: { checked: checked.length, failed: hardFailures, failureRate: checked.length ? hardFailures / checked.length : 0 },
       blind: { comparisons: comparisons.length, ties, decisive, tieRate: comparisons.length ? ties / comparisons.length : 0, decisiveRate: comparisons.length ? decisive / comparisons.length : 0, winners },
-      readiness: { cases: { current: eligible.length, target: 30 }, counterexamples: { current: counterexamples.filter((c) => c.status === "APPROVED").length, target: 10 }, goldenBriefs: { current: briefs.filter((b) => b.purpose !== "CASE_SOURCE").length, target: 60 } },
+      readiness,
+      dataGate: { ready: gateChecks.every((check) => check.passed), checks: gateChecks },
     });
   }
 
@@ -118,9 +154,8 @@ export async function handleData(request: Request, segments: string[], method: s
     assertCapability(can.createDataset(ctx.roles));
     const input = await body(request, datasetCreateSchema);
     const canSeeHoldout = isHoldoutAdmin(ctx);
-    const count = await prisma.dataset.count({ where: { workspaceId: ctx.workspaceId } });
     const dataset = await prisma.$transaction(async (tx) => {
-      const created = await tx.dataset.create({ data: { workspaceId: ctx.workspaceId, datasetNo: await nextNo("DS", count), name: input.name, type: input.type, status: "DRAFT", filterSnapshot: input, createdBy: ctx.userId } });
+      const created = await tx.dataset.create({ data: { workspaceId: ctx.workspaceId, datasetNo: await allocateDocumentNumber(tx, ctx.workspaceId, "DS"), name: input.name, type: input.type, status: "DRAFT", filterSnapshot: input, createdBy: ctx.userId } });
       let order = 0;
       for (const caseId of input.caseIds ?? []) {
         const c = await tx.case.findFirst({ where: { id: caseId, workspaceId: ctx.workspaceId, deletedAt: null }, include: { brief: { select: { split: true } }, versions: { orderBy: { version: "desc" }, take: 1 } } });

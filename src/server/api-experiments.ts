@@ -9,6 +9,15 @@ import { executeHardCheckRun } from "@/lib/hard-check";
 import { DIMENSION_CODES } from "@/lib/constants";
 import { Prisma, type Candidate, type CandidateVersion } from "@prisma/client";
 import { parseScreenshotDataUrl } from "@/lib/image";
+import {
+  assertIndependentExperimentParticipants,
+  blindPolicySnapshot,
+  buildExperimentProtocol,
+  experimentReviewerCount,
+  isBlindProtocolComplete,
+} from "@/lib/experiment-protocol";
+import { normalizeComparisonPreference, summarizeBlindResults } from "@/lib/experiment-results";
+import { allocateDocumentNumber } from "@/lib/document-number";
 
 const candidateSchema = z.object({
   title: z.string().min(1), briefId: z.string().uuid(), experimentId: z.string().uuid().optional().nullable(),
@@ -16,8 +25,13 @@ const candidateSchema = z.object({
   html: z.string().min(20), screenshotDataUrl: z.string().startsWith("data:image/"),
 });
 const experimentSchema = z.object({
-  name: z.string().min(1), briefId: z.string().uuid(), candidateIds: z.array(z.string().uuid()).min(2),
-  reviewerIds: z.array(z.string().uuid()).min(2), adjudicatorId: z.string().uuid(),
+  name: z.string().min(1), briefId: z.string().uuid(), candidateIds: z.array(z.string().uuid()).length(2),
+  reviewerIds: z.array(z.string().uuid()).min(2).max(3), adjudicatorId: z.string().uuid(),
+  protocolType: z.enum(["DEV", "HOLDOUT"]).default("DEV"),
+}).superRefine((input, ctx) => {
+  if (new Set(input.candidateIds).size !== input.candidateIds.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["candidateIds"], message: "同一候选不能同时占据 A/B 两侧" });
+  }
 });
 const blindSubmitSchema = z.object({
   scores: z.object({ left: z.record(z.number().int().min(1).max(5)), right: z.record(z.number().int().min(1).max(5)) }),
@@ -34,7 +48,6 @@ function fullScores(value: Record<string, number>) {
     if (!Number.isInteger(score) || score < 1 || score > 5) throw new ApiError(400, "VALIDATION_ERROR", "评分必须是 1–5 整数");
   }
 }
-async function nextNo(prefix: string, count: number) { return prefix + "-" + String(count + 1).padStart(4, "0"); }
 function stableFlip(seed: string) {
   return parseInt(sha256(seed).slice(0, 2), 16) % 2 === 0;
 }
@@ -54,6 +67,20 @@ async function candidateForResponse(candidateId: string, ctx: AuthContext) {
   if (!brief || (brief.split === "HOLDOUT" && !isHoldoutAdmin(ctx))) throw new ApiError(404, "NOT_FOUND", "候选不存在");
   if (!canViewCandidateStatus(ctx.roles, candidate.status)) throw new ApiError(404, "NOT_FOUND", "候选不存在");
   return candidate;
+}
+async function candidateForBlind(candidateId: string, workspaceId: string) {
+  const candidate = await prisma.candidate.findFirst({ where: { id: candidateId, workspaceId }, include: { versions: { orderBy: { version: "desc" }, take: 1 }, assets: { include: { storedFile: true } }, hardCheckRuns: { orderBy: { startedAt: "desc" }, take: 1, include: { checks: true } } } });
+  if (!candidate) throw new ApiError(404, "NOT_FOUND", "候选不存在");
+  return candidate;
+}
+async function assignedBlindPairIds(ctx: AuthContext) {
+  return (await prisma.reviewTask.findMany({
+    where: { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, type: "BLIND_PAIRWISE", experimentPairId: { not: null } },
+    select: { experimentPairId: true },
+  })).map((task) => task.experimentPairId!).filter(Boolean);
+}
+function experimentIsHoldout(experiment: { briefs: Array<{ brief: { split: string } }> }) {
+  return experiment.briefs.some((entry) => entry.brief.split === "HOLDOUT");
 }
 function latestBlockFailure(run: { checks: Array<{ severity: string; status: string; ruleId: string; message: string }> } | undefined) {
   return run?.checks.some((check) => check.severity === "BLOCK" && ["FAIL", "ERROR"].includes(check.status)) ?? true;
@@ -92,9 +119,8 @@ export async function handleExperiments(request: Request, segments: string[], me
     const brief = await prisma.brief.findFirst({ where: { id: input.briefId, workspaceId: ctx.workspaceId, deletedAt: null }, select: { split: true } });
     if (!brief || (brief.split === "HOLDOUT" && !isHoldoutAdmin(ctx))) throw new ApiError(404, "NOT_FOUND", "Brief 不存在");
     const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
-    const count = await prisma.candidate.count({ where: { workspaceId: ctx.workspaceId } });
     const created = await prisma.$transaction(async (tx) => {
-      const candidate = await tx.candidate.create({ data: { workspaceId: ctx.workspaceId, candidateNo: await nextNo("CD", count), title: input.title, briefId: input.briefId, experimentId: input.experimentId || null, createdBy: ctx.userId, status: "SUBMITTED", submittedAt: new Date() } });
+      const candidate = await tx.candidate.create({ data: { workspaceId: ctx.workspaceId, candidateNo: await allocateDocumentNumber(tx, ctx.workspaceId, "CD"), title: input.title, briefId: input.briefId, experimentId: input.experimentId || null, createdBy: ctx.userId, status: "SUBMITTED", submittedAt: new Date() } });
       const version = await tx.candidateVersion.create({ data: { candidateId: candidate.id, version: 1, html: input.html, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion, contentHash: hashObject({ html: input.html, modelProvider: input.modelProvider, modelName: input.modelName, modelVersion: input.modelVersion }), createdBy: ctx.userId } });
       const screenshotFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CANDIDATE_SCREENSHOT", bytes: screenshot.bytes });
       const htmlFile = await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: candidate.candidateNo + ".html", mimeType: "text/html", purpose: "CANDIDATE_HTML", bytes: Buffer.from(input.html) });
@@ -127,36 +153,51 @@ export async function handleExperiments(request: Request, segments: string[], me
   }
 
   if (path === "experiments" && method === "GET") {
-    return json(await prisma.experiment.findMany({ where: { workspaceId: ctx.workspaceId }, include: { _count: { select: { pairs: true, candidates: true } } }, orderBy: { createdAt: "desc" } }));
+    const assignedPairIds = isHoldoutAdmin(ctx) ? [] : await assignedBlindPairIds(ctx);
+    const visibility: Prisma.ExperimentWhereInput = isHoldoutAdmin(ctx) ? {} : {
+      OR: [
+        { briefs: { none: { brief: { split: "HOLDOUT" } } } },
+        ...(assignedPairIds.length ? [{ pairs: { some: { id: { in: assignedPairIds } } } }] : []),
+      ],
+    };
+    return json(await prisma.experiment.findMany({ where: { workspaceId: ctx.workspaceId, ...visibility }, include: { _count: { select: { pairs: true, candidates: true } } }, orderBy: { createdAt: "desc" } }));
   }
   if (path === "experiments" && method === "POST") {
     assertCapability(can.manageExperiments(ctx.roles));
     const input = await body(request, experimentSchema);
-    const brief = await prisma.brief.findFirst({ where: { id: input.briefId, workspaceId: ctx.workspaceId, split: { not: "HOLDOUT" } }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
-    if (!brief) throw new ApiError(404, "NOT_FOUND", "Brief 不存在或不可用于普通实验");
+    const brief = await prisma.brief.findFirst({ where: { id: input.briefId, workspaceId: ctx.workspaceId, deletedAt: null }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } });
+    if (!brief?.versions[0]) throw new ApiError(404, "NOT_FOUND", "Brief 不存在或没有可用版本");
+    const expectedType = brief.split === "HOLDOUT" ? "HOLDOUT" : "DEV";
+    if (input.protocolType !== expectedType) throw new ApiError(400, "VALIDATION_ERROR", "实验类型必须与 Brief 的 DEV/HOLDOUT 分区一致");
+    if (expectedType === "HOLDOUT" && !isHoldoutAdmin(ctx)) throw new ApiError(403, "FORBIDDEN", "只有 Owner/Admin 可以创建 Holdout 实验");
+    assertIndependentExperimentParticipants(input.reviewerIds, input.adjudicatorId);
     const candidates = await prisma.candidate.findMany({ where: { id: { in: input.candidateIds }, workspaceId: ctx.workspaceId }, include: { versions: { orderBy: { version: "desc" }, take: 1 }, hardCheckRuns: { orderBy: { startedAt: "desc" }, take: 1, include: { checks: true } } } });
-    if (candidates.length < 2) throw new ApiError(400, "VALIDATION_ERROR", "至少需要 2 个候选");
-    for (const candidate of candidates) {
+    if (candidates.length !== 2) throw new ApiError(400, "VALIDATION_ERROR", "实验必须且只能包含 2 个候选");
+    const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    const orderedCandidates = input.candidateIds.map((id) => byId.get(id)!).filter(Boolean);
+    if (orderedCandidates.length !== 2) throw new ApiError(400, "VALIDATION_ERROR", "候选不属于当前 Workspace");
+    for (const candidate of orderedCandidates) {
       if (candidate.briefId !== brief.id) throw new ApiError(409, "INVALID_STATE", candidate.candidateNo + " 与实验 Brief 不一致");
       if (candidate.status !== "READY_FOR_BLIND") throw new ApiError(409, "INVALID_STATE", candidate.candidateNo + " 尚未通过硬检查进入 READY_FOR_BLIND");
       if (latestBlockFailure(candidate.hardCheckRuns[0])) throw new ApiError(409, "HARD_CHECK_REQUIRED", candidate.candidateNo + " 最新硬检查未通过，不能进入盲测");
       if (!candidate.versions[0]) throw new ApiError(409, "INVALID_STATE", candidate.candidateNo + " 缺少版本");
     }
-    for (const reviewerId of input.reviewerIds) {
-      const membership = await prisma.membership.findFirst({ where: { userId: reviewerId, workspaceId: ctx.workspaceId, status: "ACTIVE" } });
-      if (!membership) throw new ApiError(400, "VALIDATION_ERROR", "评审人不在 Workspace");
-    }
-    const adjudicatorMembership = await prisma.membership.findFirst({ where: { userId: input.adjudicatorId, workspaceId: ctx.workspaceId, status: "ACTIVE" } });
-    if (!adjudicatorMembership) throw new ApiError(400, "VALIDATION_ERROR", "裁决人不在 Workspace");
-    const count = await prisma.experiment.count({ where: { workspaceId: ctx.workspaceId } });
+    const candidateCreators = new Set(orderedCandidates.map((candidate) => candidate.createdBy));
+    if (input.reviewerIds.some((reviewerId) => candidateCreators.has(reviewerId))) throw new ApiError(400, "VALIDATION_ERROR", "候选制作人不能担任同组评审");
+    if (candidateCreators.has(input.adjudicatorId)) throw new ApiError(400, "VALIDATION_ERROR", "候选制作人不能担任同组裁决人");
+    const participantIds = [...input.reviewerIds, input.adjudicatorId];
+    const memberships = await prisma.membership.findMany({ where: { userId: { in: participantIds }, workspaceId: ctx.workspaceId, status: "ACTIVE" }, select: { userId: true } });
+    if (new Set(memberships.map((membership) => membership.userId)).size !== participantIds.length) throw new ApiError(400, "VALIDATION_ERROR", "评审人或裁决人不是当前 Workspace 的有效成员");
+    const protocol = buildExperimentProtocol({ type: expectedType, reviewerIds: input.reviewerIds, adjudicatorId: input.adjudicatorId });
     const experiment = await prisma.$transaction(async (tx) => {
-      const created = await tx.experiment.create({ data: { workspaceId: ctx.workspaceId, experimentNo: await nextNo("EX", count), name: input.name, status: "RUNNING", protocol: { reviewers: input.reviewerIds.length, adjudicator: 1, adjudicatorId: input.adjudicatorId, hideModel: true, hideSource: true, tieAllowed: true }, createdBy: ctx.userId, frozenAt: new Date(), startsAt: new Date() } });
+      const created = await tx.experiment.create({ data: { workspaceId: ctx.workspaceId, experimentNo: await allocateDocumentNumber(tx, ctx.workspaceId, "EX"), name: input.name, status: "RUNNING", protocol: JSON.parse(JSON.stringify(protocol)), createdBy: ctx.userId, frozenAt: new Date(), startsAt: new Date() } });
       await tx.experimentBrief.create({ data: { experimentId: created.id, briefId: brief.id, briefVersionId: brief.versions[0].id } });
-      const pair = await tx.experimentPair.create({ data: { workspaceId: ctx.workspaceId, experimentId: created.id, briefId: brief.id, pairNo: "P-0001", leftCandidateId: candidates[0].id, leftCandidateVersionId: candidates[0].versions[0].id, leftContentHash: candidates[0].versions[0].contentHash, rightCandidateId: candidates[1].id, rightCandidateVersionId: candidates[1].versions[0].id, rightContentHash: candidates[1].versions[0].contentHash, status: "READY" } });
-      for (const candidate of candidates.slice(0, 2)) await tx.candidate.update({ where: { id: candidate.id }, data: { experimentId: created.id, status: "IN_BLIND" } });
-      for (const reviewerId of input.reviewerIds) await tx.reviewTask.create({ data: { workspaceId: ctx.workspaceId, type: "BLIND_PAIRWISE", subjectType: "EXPERIMENT_PAIR", subjectId: pair.id, experimentPairId: pair.id, assigneeId: reviewerId, reviewRole: "REVIEWER", status: "ASSIGNED", assignedBy: ctx.userId, blindPolicySnapshot: { hideModel: true, hideSource: true, hidePreviousScores: true, revealAfterReviewers: 2 } } });
-      await tx.reviewTask.create({ data: { workspaceId: ctx.workspaceId, type: "ARBITRATION", subjectType: "EXPERIMENT_PAIR", subjectId: pair.id, experimentPairId: pair.id, assigneeId: input.adjudicatorId, reviewRole: "ADJUDICATOR", status: "ASSIGNED", assignedBy: ctx.userId } });
-      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "EXPERIMENT_CREATED", resourceType: "EXPERIMENT", resourceId: created.id, after: input, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+      const left = orderedCandidates[0], right = orderedCandidates[1];
+      const pair = await tx.experimentPair.create({ data: { workspaceId: ctx.workspaceId, experimentId: created.id, briefId: brief.id, pairNo: "P-0001", leftCandidateId: left.id, leftCandidateVersionId: left.versions[0].id, leftContentHash: left.versions[0].contentHash, rightCandidateId: right.id, rightCandidateVersionId: right.versions[0].id, rightContentHash: right.versions[0].contentHash, status: "READY" } });
+      for (const candidate of orderedCandidates) await tx.candidate.update({ where: { id: candidate.id }, data: { experimentId: created.id, status: "IN_BLIND" } });
+      const policy = blindPolicySnapshot(protocol);
+      for (const reviewerId of input.reviewerIds) await tx.reviewTask.create({ data: { workspaceId: ctx.workspaceId, type: "BLIND_PAIRWISE", subjectType: "EXPERIMENT_PAIR", subjectId: pair.id, experimentPairId: pair.id, assigneeId: reviewerId, reviewRole: "REVIEWER", status: "ASSIGNED", assignedBy: ctx.userId, blindPolicySnapshot: JSON.parse(JSON.stringify(policy)) } });
+      await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "EXPERIMENT_CREATED", resourceType: "EXPERIMENT", resourceId: created.id, after: { ...input, protocol }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return created;
     });
     return json(experiment, 201);
@@ -165,14 +206,21 @@ export async function handleExperiments(request: Request, segments: string[], me
   if (experimentMatch) {
     const experiment = await prisma.experiment.findFirst({ where: { id: experimentMatch[1], workspaceId: ctx.workspaceId }, include: { pairs: true, briefs: { include: { brief: { include: { versions: { orderBy: { version: "desc" }, take: 1 } } } } }, candidates: { include: { versions: { orderBy: { version: "desc" }, take: 1 } } } } });
     if (!experiment) throw new ApiError(404, "NOT_FOUND", "实验不存在");
+    const holdoutExperiment = experimentIsHoldout(experiment);
+    const restrictToAssigned = !canInspectExperiment(ctx.roles) || (holdoutExperiment && !isHoldoutAdmin(ctx));
+    const assignedPairIds = restrictToAssigned ? await assignedBlindPairIds(ctx) : [];
+    const assignedPairIdSet = new Set(assignedPairIds);
+    const visiblePairs = restrictToAssigned ? experiment.pairs.filter((pair) => assignedPairIdSet.has(pair.id)) : experiment.pairs;
+    if (holdoutExperiment && !isHoldoutAdmin(ctx) && !visiblePairs.length) throw new ApiError(404, "NOT_FOUND", "实验不存在");
     if (method === "GET" && !experimentMatch[2]) {
-      if (!canInspectExperiment(ctx.roles)) {
-        return json({ id: experiment.id, experimentNo: experiment.experimentNo, name: experiment.name, status: experiment.status, rubricVersion: experiment.rubricVersion, protocol: { hideModel: true, hideSource: true, hidePreviousScores: true }, startsAt: experiment.startsAt, closesAt: experiment.closesAt, pairs: experiment.pairs.map((pair) => ({ id: pair.id, pairNo: pair.pairNo, status: pair.status })), briefs: experiment.briefs.map((entry) => ({ briefId: entry.briefId, briefVersionId: entry.briefVersionId })) });
+      if (!canInspectExperiment(ctx.roles) || (holdoutExperiment && !isHoldoutAdmin(ctx))) {
+        return json({ id: experiment.id, experimentNo: experiment.experimentNo, name: experiment.name, status: experiment.status, rubricVersion: experiment.rubricVersion, protocol: { type: holdoutExperiment ? "HOLDOUT" : "DEV", reviewers: experimentReviewerCount(experiment.protocol), hideModel: true, hideSource: true, hidePreviousScores: true }, startsAt: experiment.startsAt, closesAt: experiment.closesAt, pairs: visiblePairs.map((pair) => ({ id: pair.id, pairNo: pair.pairNo, status: pair.status })), briefs: experiment.briefs.filter((entry) => visiblePairs.some((pair) => pair.briefId === entry.briefId)).map((entry) => ({ briefId: entry.briefId, briefVersionId: entry.briefVersionId })) });
       }
       return json(experiment);
     }
     if (method === "POST" && experimentMatch[2] === "close") {
       assertCapability(can.manageExperiments(ctx.roles));
+      if (holdoutExperiment && !isHoldoutAdmin(ctx)) throw new ApiError(403, "FORBIDDEN", "只有 Owner/Admin 可以关闭 Holdout 实验");
       const incomplete = experiment.pairs.filter((p) => !["COMPLETED","CANCELLED"].includes(p.status));
       if (incomplete.length) throw new ApiError(409, "INVALID_STATE", "仍有未完成的 pair");
       const updated = await prisma.$transaction(async (tx) => {
@@ -185,13 +233,15 @@ export async function handleExperiments(request: Request, segments: string[], me
     }
     if (method === "GET" && experimentMatch[2] === "results") {
       if (!canInspectExperiment(ctx.roles)) throw new ApiError(403, "FORBIDDEN", "盲测结果仅对实验管理角色开放");
+      if (holdoutExperiment && !isHoldoutAdmin(ctx)) throw new ApiError(403, "FORBIDDEN", "Holdout 结果仅对 Owner/Admin 开放");
       if (experiment.status !== "CLOSED") throw new ApiError(409, "BLIND_ACTIVE", "盲测尚未关闭，不能查看结果");
       const comparisons = await prisma.pairwiseComparison.findMany({ where: { experimentId: experiment.id, status: "SUBMITTED" }, include: { scores: true } });
-      return json({ experiment, comparisons });
+      const summary = summarizeBlindResults(experiment.pairs, comparisons, experimentReviewerCount(experiment.protocol));
+      const pairById = new Map(experiment.pairs.map((pair) => [pair.id, pair]));
+      return json({ experiment, summary, comparisons: comparisons.map((comparison) => { const pair = pairById.get(comparison.experimentPairId); return { ...comparison, normalizedPreference: pair ? normalizeComparisonPreference(comparison, pair.leftCandidateId, pair.rightCandidateId) : "TIE" }; }) });
     }
     if (method === "GET" && experimentMatch[2] === "blind") {
-      const assignedPairIds = canInspectExperiment(ctx.roles) ? null : (await prisma.reviewTask.findMany({ where: { workspaceId: ctx.workspaceId, assigneeId: ctx.userId, type: "BLIND_PAIRWISE", experimentPairId: { not: null } }, select: { experimentPairId: true } })).map((task) => task.experimentPairId!).filter(Boolean);
-      const pairs = await prisma.experimentPair.findMany({ where: { experimentId: experiment.id, ...(assignedPairIds ? { id: { in: assignedPairIds } } : {}) }, include: { comparisons: { where: { reviewerId: ctx.userId, status: "SUBMITTED" } } } });
+      const pairs = await prisma.experimentPair.findMany({ where: { experimentId: experiment.id, ...(restrictToAssigned ? { id: { in: assignedPairIds } } : {}) }, include: { comparisons: { where: { reviewerId: ctx.userId, status: "SUBMITTED" } } } });
       return json({ experiment: { id: experiment.id, experimentNo: experiment.experimentNo, name: experiment.name, status: experiment.status }, pairs: pairs.map((p) => ({ id: p.id, pairNo: p.pairNo, status: p.status, submitted: p.comparisons.length > 0 })) });
     }
   }
@@ -201,8 +251,9 @@ export async function handleExperiments(request: Request, segments: string[], me
     if (!pair) throw new ApiError(404, "NOT_FOUND", "盲测 pair 不存在");
     const task = await prisma.reviewTask.findFirst({ where: { workspaceId: ctx.workspaceId, experimentPairId: pair.id, assigneeId: ctx.userId, type: "BLIND_PAIRWISE" } });
     if (!task) throw new ApiError(403, "FORBIDDEN", "你不是该 pair 的被分配评审");
-    const left = await candidateForResponse(pair.leftCandidateId, ctx);
-    const right = await candidateForResponse(pair.rightCandidateId, ctx);
+    const experiment = await prisma.experiment.findUniqueOrThrow({ where: { id: pair.experimentId } });
+    const left = await candidateForBlind(pair.leftCandidateId, ctx.workspaceId);
+    const right = await candidateForBlind(pair.rightCandidateId, ctx.workspaceId);
     const existing = await prisma.pairwiseComparison.findFirst({ where: { taskId: task.id, status: "SUBMITTED" }, include: { scores: true } });
     const flip = stableFlip(task.id + ctx.userId);
     const leftCandidate = flip ? right : left;
@@ -211,14 +262,14 @@ export async function handleExperiments(request: Request, segments: string[], me
     const rightVersion = rightCandidate.versions[0];
     const payload = {
       pairId: pair.id, pairNo: pair.pairNo, taskId: task.id, taskStatus: task.status,
-      experimentStatus: (await prisma.experiment.findUniqueOrThrow({ where: { id: pair.experimentId } })).status,
+      experimentStatus: experiment.status,
       submitted: Boolean(existing),
       existing: existing ? { preference: existing.preference, rationale: existing.rationale, confidence: existing.confidence, scores: existing.scores, hardCheckAcknowledged: existing.hardCheckAcknowledged, hardCheckNotes: existing.hardCheckNotes } : null,
       brief: await prisma.brief.findUnique({ where: { id: pair.briefId }, include: { versions: { orderBy: { version: "desc" }, take: 1 } } }).then((b) => b ? { briefNo: b.briefNo, title: b.title, content: b.versions[0] } : null),
       left: blindSide(leftVersion, leftCandidate.assets, "A"),
       right: blindSide(rightVersion, rightCandidate.assets, "B"),
       hardChecks: { left: publicHardCheck(leftCandidate.hardCheckRuns[0]?.checks), right: publicHardCheck(rightCandidate.hardCheckRuns[0]?.checks) },
-      reveal: (await prisma.experiment.findUniqueOrThrow({ where: { id: pair.experimentId } })).status === "CLOSED" ? { leftCandidateId: leftCandidate.id, rightCandidateId: rightCandidate.id } : null,
+      reveal: experiment.status === "CLOSED" ? { leftCandidateId: leftCandidate.id, rightCandidateId: rightCandidate.id } : null,
     };
     if (method === "GET") return json(payload);
     if (method === "POST") {
@@ -238,22 +289,21 @@ export async function handleExperiments(request: Request, segments: string[], me
         for (const [side, scores] of [["LEFT", input.scores.left], ["RIGHT", input.scores.right]] as const) for (const [dimensionCode, score] of Object.entries(scores)) rows.push({ comparisonId: created.id, side, dimensionCode, score });
         await tx.pairwiseScore.createMany({ data: rows });
         await tx.reviewTask.update({ where: { id: task.id }, data: { status: "SUBMITTED", submittedAt: new Date() } });
+        const submittedReviewerIds = new Set((await tx.pairwiseComparison.findMany({ where: { experimentPairId: pair.id, status: "SUBMITTED" }, select: { reviewerId: true } })).map((row) => row.reviewerId));
+        if (submittedReviewerIds.size) await tx.experimentPair.update({ where: { id: pair.id }, data: { status: "IN_PROGRESS" } });
+        if (isBlindProtocolComplete(experiment.protocol, submittedReviewerIds.size)) {
+          const existingAdjudicator = await tx.reviewTask.findFirst({ where: { type: "ARBITRATION", subjectId: pair.id, status: { in: ["ASSIGNED","PENDING","IN_PROGRESS"] } } });
+          if (!existingAdjudicator) {
+            const protocol = experiment.protocol as Record<string, unknown>;
+            const preferred = typeof protocol.adjudicatorId === "string" ? protocol.adjudicatorId : null;
+            const owner = preferred ? null : await tx.user.findFirst({ where: { memberships: { some: { workspaceId: ctx.workspaceId, status: "ACTIVE", roles: { some: { role: { code: "OWNER" } } } } } } });
+            const adjudicatorId = preferred ?? owner?.id;
+            if (adjudicatorId) await tx.reviewTask.create({ data: { workspaceId: ctx.workspaceId, type: "ARBITRATION", subjectType: "EXPERIMENT_PAIR", subjectId: pair.id, experimentPairId: pair.id, assigneeId: adjudicatorId, reviewRole: "ADJUDICATOR", status: "ASSIGNED", assignedBy: ctx.userId } });
+          }
+        }
         await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "BLIND_COMPARISON_SUBMITTED", resourceType: "EXPERIMENT_PAIR", resourceId: pair.id, after: { preference: input.preference, confidence: input.confidence }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
         return created;
       });
-      const submitted = await prisma.pairwiseComparison.count({ where: { experimentPairId: pair.id, status: "SUBMITTED" } });
-      if (submitted >= 2) {
-        await prisma.experimentPair.update({ where: { id: pair.id }, data: { status: "IN_PROGRESS" } });
-        const existingAdjudicator = await prisma.reviewTask.findFirst({ where: { type: "ARBITRATION", subjectId: pair.id, status: { in: ["ASSIGNED","PENDING","IN_PROGRESS"] } } });
-        if (!existingAdjudicator) {
-          const experiment = await prisma.experiment.findUniqueOrThrow({ where: { id: pair.experimentId } });
-          const protocol = experiment.protocol as Record<string, unknown>;
-          const preferred = typeof protocol.adjudicatorId === "string" ? protocol.adjudicatorId : null;
-          const owner = preferred ? null : await prisma.user.findFirst({ where: { memberships: { some: { workspaceId: ctx.workspaceId, status: "ACTIVE", roles: { some: { role: { code: "OWNER" } } } } } } });
-          const adjudicatorId = preferred ?? owner?.id;
-          if (adjudicatorId) await prisma.reviewTask.create({ data: { workspaceId: ctx.workspaceId, type: "ARBITRATION", subjectType: "EXPERIMENT_PAIR", subjectId: pair.id, experimentPairId: pair.id, assigneeId: adjudicatorId, reviewRole: "ADJUDICATOR", status: "ASSIGNED", assignedBy: ctx.userId } });
-        }
-      }
       return json(comparison, 201);
     }
   }

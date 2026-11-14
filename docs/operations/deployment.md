@@ -90,7 +90,7 @@ npm run bootstrap:admin
 
 - 在 Nginx/Ingress/ALB 终止 TLS，转发到 `app:3000`。
 - 设置 `APP_URL=https://...` 与 `COOKIE_SECURE=true`。
-- 当前稳定环境为简化登录，只保留邮箱密码与 RBAC，未启用站点级 Basic Auth；MVP 尚未内置速率限制、WAF 或细粒度防滥用策略，只应向团队受控分发地址，真实试点仍建议置于组织 SSO 网关或 IP 允许列表之后。
+- 当前稳定环境只保留邮箱密码、RBAC 和登录失败节流，未启用站点级 Basic Auth、MFA、WAF 或 IP 允许列表；只应向团队受控分发地址，真实数据试点仍建议置于组织 SSO 网关之后。
 - 保留 `X-Forwarded-For` 与 `X-Request-Id`，审计会记录请求元数据。
 
 ## 渲染器
@@ -125,10 +125,12 @@ Render Free 不是当前稳定环境，只作为备用演示。完全免费的�
 
 ## 监控
 
-至少监控：
+稳定公网已安装 `wecraft-training-monitor.timer`，每 5 分钟检查：
 
-- `/api/v1/health` 存活、5xx 率、P95 延迟。
-- 硬检查 ERROR 率和渲染器启动失败。
-- 数据集 `BLOCKED` 数量、导出失败、审计写入失败。
-- PostgreSQL 连接数、磁盘、慢查询；对象存储容量与错误率。
+- `/api/v1/health` 存活和数据库可用性。
+- 应用、PostgreSQL 容器健康状态。
+- 根分区磁盘 85% 阈值。
+- 最新备份是否存在且不超过 26 小时。
+
+配置飞书机器人后，告警和恢复通知会发送到群；未配置时脚本会明确输出跳过原因。后续仍应补充 5xx 率、P95 延迟、硬检查 ERROR、导出失败和审计写入失败的指标监控。
 

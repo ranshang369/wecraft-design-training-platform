@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { expect, test } from "@playwright/test";
 import { CASE_METADATA, expectStatus, IDS, newSession, readJson, SAFE_HTML, SCREENSHOT_DATA_URL, scores } from "./helpers";
 import { hashObject } from "../../src/lib/hash";
+import { loginThrottleTargets } from "../../src/lib/login-guard";
 
 const prisma = new PrismaClient();
 
@@ -146,6 +147,22 @@ test("Holdout：普通角色无法通过 ID 读取数据集或截图文件", asy
     expectStatus(await owner.get("/api/v1/datasets/" + datasetId), 200);
   } finally {
     await Promise.all([owner.dispose(), lead.dispose(), viewer.dispose(), engineer.dispose()]);
+  }
+});
+
+test("登录节流：连续失败后阻断同一账号继续尝试", async ({ request }) => {
+  const email = "login-throttle-" + Date.now() + "@example.test";
+  try {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const response = await request.post("/api/v1/auth/login", { data: { email, password: "WrongPassword!" } });
+      expectStatus(response, 401);
+    }
+    const blocked = await request.post("/api/v1/auth/login", { data: { email, password: "WrongPassword!" } });
+    expectStatus(blocked, 429);
+    expect((await blocked.json()).error.code).toBe("RATE_LIMITED");
+  } finally {
+    const accountKey = loginThrottleTargets(email)[0].key;
+    await prisma.authThrottle.deleteMany({ where: { key: accountKey } });
   }
 });
 

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
 
+export const MAX_JSON_BODY_BYTES = 10 * 1024 * 1024;
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -29,9 +31,38 @@ export function errorResponse(error: unknown) {
   return NextResponse.json({ error: { code: "INTERNAL_ERROR", message: "服务器内部错误" } }, { status: 500 });
 }
 
+async function readJsonText(request: Request): Promise<string> {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength && (!/^\d+$/.test(declaredLength) || Number(declaredLength) > MAX_JSON_BODY_BYTES)) {
+    throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 10MB 上限");
+  }
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_JSON_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new ApiError(413, "PAYLOAD_TOO_LARGE", "请求体超过 10MB 上限");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function body<T>(request: Request, schema: ZodType<T>): Promise<T> {
   let raw: unknown;
-  try { raw = await request.json(); } catch { throw new ApiError(400, "VALIDATION_ERROR", "请求体必须为 JSON"); }
+  try { raw = JSON.parse(await readJsonText(request)); } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(400, "VALIDATION_ERROR", "请求体必须为 JSON");
+  }
   return schema.parse(raw);
 }
 

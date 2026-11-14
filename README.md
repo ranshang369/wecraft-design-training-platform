@@ -105,9 +105,9 @@ npm run db:seed
 npm run test:e2e
 ```
 
-E2E 依赖干净种子数据。重新跑之前先执行 `npm run db:seed`。当前覆盖 10 条验收：案例入库、评审修订、盲测裁决、数据导出、恶意 HTML、375px 溢出、RBAC、跨 Workspace 隔离、Holdout 文件隔离和审计链复算。
+E2E 依赖干净种子数据。重新跑之前先执行 `npm run db:seed`。当前覆盖 13 条验收：案例入库、评审修订、盲测裁决、数据导出、恶意 HTML、375px 溢出、RBAC、跨 Workspace 隔离、Holdout 三评与文件隔离、登录节流、并发编号分配和审计链复算。
 
-本地已验证 Node.js 22、PostgreSQL、Chrome 路径下的 typecheck、单测、构建和 E2E。稳定公网环境已在 Ubuntu 22.04、Docker Compose 与 Caddy 上完成容器部署、HTTPS、Chromium 硬检查、文件读取和数据持久化冒烟测试。
+本地已验证 Node.js 22、PostgreSQL、Chrome 路径下的 typecheck、37 项单测、构建和 13 项 E2E。稳定公网环境已在 Ubuntu 22.04、Docker Compose 与 Caddy 上完成容器部署、HTTPS、Chromium 硬检查、文件读取、数据库备份、隔离恢复演练、登录节流和健康监控冒烟测试。
 
 ## 公网环境
 
@@ -123,6 +123,7 @@ Render Free 保留为备用演示方案：免费 Web 服务 15 分钟无请求�
 - [实际 API 文档](docs/api.md)
 - [部署与运维](docs/operations/deployment.md)
 - [稳定公网部署](docs/operations/stable-public.md)
+- [正式试点上线与训练效果验收](docs/operations/production-readiness.md)
 - [Render Free 部署](docs/operations/render-free.md)
 - [安全、审计与备份](docs/operations/security-backup.md)
 - [测试报告](docs/test-report.md)

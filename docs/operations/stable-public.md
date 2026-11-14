@@ -14,13 +14,23 @@
 
 ## 2026-11-13 验收记录
 
-- HTTPS 健康检查返回 `200`，响应包含 `ok: true`；根路径直接返回 `200` 登录页，不再弹出 Basic Auth 口令框。
+- HTTPS 健康检查返回 `200`，响应包含 `ok: true`；根路径 `307` 跳转到 `/login`，登录页返回 `200`，不再弹出 Basic Auth 口令框。
 - Owner 与 Annotator 登录返回 `200`，Worker、PostgreSQL、Caddy 反向代理均正常。
 - 案例截图与 HTML 文件返回 `200`；HTML 响应带 `default-src 'none'`、`script-src 'none'` 等 CSP，预览在沙箱中运行。
 - 候选 `CD-0001`、`CD-0002` 的 `HC-01` 至 `HC-05` 均为 `PASS`，证明容器内 Chromium 可执行硬检查。
 - 盲测 pair 返回匿名 A/B、Brief 和文件 ID，不包含模型名、模型版本、来源或上一轮分数。
 - `DS-0001` 返回 `422 DATASET_BLOCKED`，阻断项为 `RIGHTS_MISSING`（`CA-0005` 缺少训练授权），导出门禁按设计生效。
 - 应用容器重启后，健康检查、账号登录和数据库内文件仍可用，验证 PostgreSQL 与 `STORAGE_DRIVER=database` 的持久化。
+
+## 2026-11-14 生产化验收记录
+
+- 健康检查返回 `200`、`ok: true`、`database: "ok"` 和部署版本号；数据库故障会返回 `503`。
+- 登录失败按账号 8 次、IP 30 次阻断 15 分钟，返回 `429`；限流键只保存 SHA-256，不落明文邮箱或 IP。
+- 并发创建数据集的编号冲突已修复；编号由 PostgreSQL 原子序列分配，并有 8 路并发 E2E 回归。
+- Holdout 支持 2–3 名独立评审，裁决人不得兼任评审，候选制作人不得参与同组评审或裁决；结果按固定候选 A/B 归一化。
+- 每日 `02:30` 自动备份 PostgreSQL，30 天保留，备份带 SHA-256 和 `pg_restore` 可读性校验；已在隔离数据库完成一次恢复演练。
+- 每 5 分钟检查健康、数据库、容器、磁盘和备份新鲜度；监控当前仅写本机日志，飞书 webhook 尚未配置。
+- 所有 JSON API 统一限制 10MB 请求体，超限返回 `413 PAYLOAD_TOO_LARGE`。
 
 ## 隔离边界
 
@@ -102,7 +112,7 @@ curl -fsS https://wecraft-training.zer-go.cn/api/v1/health
 curl -sS -o /dev/null -w '%{http_code}\n' https://wecraft-training.zer-go.cn/
 ```
 
-期望健康检查为 `200` 且返回 `ok: true`；根路径为 `200` 并直接显示登录页。随后用浏览器完成：
+期望健康检查为 `200` 且返回 `ok: true`；根路径返回 `307` 并跳转到 `/login`，登录页返回 `200`。随后用浏览器完成：
 
 1. 使用 Owner 邮箱和密码登录。
 2. 打开案例详情，确认 375px 截图与沙箱 HTML 可见。
@@ -112,31 +122,44 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://wecraft-training.zer-go.cn/
 
 ## 更新与回滚
 
-更新应用：
+更新应用时使用固定 revision，禁止直接覆盖 `latest`。脚本会获取与 WeCraft 生产发布共用的 `/run/wecraft-release.lock`，在构建前备份数据库，并在切换后校验公网健康、revision、登录页和 Caddy 路由：
 
 ```bash
 cd /opt/wecraft-training
-docker compose --env-file deploy/training/.env -f deploy/training/docker-compose.yml build app
-docker compose --env-file deploy/training/.env -f deploy/training/docker-compose.yml up -d app
+bash scripts/ops/release.sh <immutable-revision-tag>
 ```
 
-回滚代码时使用上一个已验证的源码版本重新执行同一构建命令。数据库迁移只能使用已提交的向后兼容迁移，不执行 `prisma migrate reset`，不对生产数据运行 `db seed` 重置。
+成功输出必须包含 `RELEASE_OK`。若生产发布正在构建，脚本会以退出码 75 拒绝并发执行。回滚应用时使用 `/var/lib/wecraft-training/last-release` 之前的固定镜像标签；数据库迁移只能使用已提交的向后兼容迁移，不执行 `prisma migrate reset`，不对生产数据运行 `db seed` 重置。
 
 ## 备份
 
-当前已使用命名卷持久化 PostgreSQL，但尚未配置自动异地备份。上线协作训练前，至少每日执行一次逻辑备份，并将备份移出本机：
+当前使用命名卷持久化 PostgreSQL，并已安装每日自动备份：
 
 ```bash
-docker exec wecraft-design-training-db-1 \
-  pg_dump -U wecraft_training -d wecraft_dt -Fc \
-  > /opt/wecraft-training/backup-$(date +%F).dump
+systemctl list-timers 'wecraft-training-*' --all
+bash /opt/wecraft-training/scripts/ops/backup-postgres.sh
+bash /opt/wecraft-training/scripts/ops/restore-drill.sh /var/backups/wecraft-training/latest.dump
 ```
 
-恢复演练必须在隔离目录进行。数据库密码、会话密钥和账号密码只存放在服务器 `/opt/wecraft-training/deploy/training/.env` 与受控密钥库，不写入 Git 或公开飞书文档。
+备份写入 `/var/backups/wecraft-training`，默认保留 30 天；恢复演练会创建临时数据库、校验至少一个 Workspace 后立即删除，不触碰生产库。
+
+仍需配置 `RCLONE_REMOTE` 完成异地副本。当前 `backup.env` 留空时脚本会明确输出 `offsite_copy=skipped`，不能把本机备份视为灾备完成。
+
+数据库密码、会话密钥和账号密码只存放在服务器 `/opt/wecraft-training/deploy/training/.env` 与受控密钥库，不写入 Git 或公开飞书文档。
+
+## 监控与告警
+
+```bash
+systemctl status wecraft-training-monitor.timer --no-pager
+bash /opt/wecraft-training/scripts/ops/monitor.sh
+```
+
+监控每 5 分钟检查 HTTPS 健康、数据库、应用/数据库容器状态、磁盘 85% 阈值、备份 26 小时新鲜度和训练平台 Caddy 路由。将飞书自定义机器人 webhook 写入 `/etc/wecraft-training/monitor.env` 的 `ALERT_WEBHOOK_URL` 后，告警才会实际送达；webhook 文件必须保持 `600`，不得提交到 Git。
 
 ## 已知边界
 
 - 主入口依赖 `zer-go.cn` 的 `wecraft-training` A 记录；修改 DNS 时必须保持指向 `39.105.45.154`，并同步更新 `APP_URL` 与 Caddy Host。旧 `sslip.io` 地址仍作为兼容别名保留。
-- 为简化登录，当前未启用站点门禁和 MFA，也没有登录速率限制；只应通过受控渠道分发地址，并在真实数据试点前补 SSO、速率限制和监控。
+- 当前未启用 MFA、企业 SSO、WAF 或 IP 允许列表；邮箱登录已启用失败节流和健康监控，但仍应通过受控渠道分发地址。
+- 自动备份目前只在本机；异地备份和飞书告警送达仍需配置外部凭据。
 - 当前数据是虚构演示数据，不包含真实案例、授权证据或生产内容。
 - 部署健康与功能冒烟通过，不等于模型训练已经产生可验证的设计提升。训练效果必须用 HOLD OUT 实验、盲评一致性和可复现证据单独验收。

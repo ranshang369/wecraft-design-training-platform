@@ -58,7 +58,7 @@ if ((SKIP_BACKUP == 0)); then
 fi
 
 APP_REVISION="$REVISION" nice -n 19 ionice -c 2 -n 7 \
-  "${COMPOSE[@]}" build --progress plain app
+  "${COMPOSE[@]}" --progress plain build app
 
 BUILT_REVISION="$(docker image inspect "$IMAGE" \
   --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
@@ -66,6 +66,21 @@ BUILT_REVISION="$(docker image inspect "$IMAGE" \
   printf 'image revision mismatch: expected=%s actual=%s\n' "$REVISION" "$BUILT_REVISION" >&2
   exit 1
 }
+
+APP_REVISION="$REVISION" "${COMPOSE[@]}" up -d --no-build db
+
+db_health=starting
+for _ in $(seq 1 40); do
+  db_health="$(docker inspect wecraft-design-training-db-1 \
+    --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || echo missing)"
+  [[ "$db_health" == healthy ]] && break
+  sleep 3
+done
+if [[ "$db_health" != healthy ]]; then
+  docker logs --tail 120 wecraft-design-training-db-1 >&2 || true
+  printf 'database did not become healthy: %s\n' "$db_health" >&2
+  exit 1
+fi
 
 APP_REVISION="$REVISION" "${COMPOSE[@]}" up -d --no-build app
 

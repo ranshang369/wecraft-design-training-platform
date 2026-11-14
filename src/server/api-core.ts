@@ -13,7 +13,7 @@ import { notify } from "@/lib/notifications";
 import { DIMENSION_CODES, DIMENSIONS } from "@/lib/constants";
 import { parseScreenshotDataUrl } from "@/lib/image";
 import { aggregateReviewEvidence } from "@/lib/review-aggregation";
-import { INTENT_TAG_IDS, START_POINT_IDS, caseMetadataIssues, inferInternalArchetype } from "@/lib/case-metadata";
+import { INTENT_TAG_IDS, START_POINT_IDS, caseMetadataReview, inferInternalArchetype } from "@/lib/case-metadata";
 
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
 const inviteSchema = z.object({ email: z.string().email(), roleCode: z.enum(["OWNER","ADMIN","DESIGN_LEAD","CONTENT_LEAD","EDITOR","ANNOTATOR","AI_ENGINEER","VIEWER"]) });
@@ -277,8 +277,8 @@ export async function handleCore(request: Request, segments: string[], method: s
     const input = await body(request, caseCreateSchema);
     await assertBriefReference(ctx, input.briefId);
     fullScores(input.selfScores);
-    const metadataIssues = caseMetadataIssues(input);
-    if (metadataIssues.length) throw new ApiError(422, "VALIDATION_ERROR", metadataIssues.join("；"));
+    const metadata = caseMetadataReview(input);
+    if (metadata.errors.length) throw new ApiError(422, "VALIDATION_ERROR", metadata.errors.join("；"));
     const screenshot = parseScreenshotDataUrl(input.screenshotDataUrl);
     const count = await prisma.case.count({ where: { workspaceId: ctx.workspaceId } });
     const created = await prisma.$transaction(async (tx) => {
@@ -293,7 +293,7 @@ export async function handleCore(request: Request, segments: string[], method: s
       await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_CREATED", resourceType: "CASE", resourceId: caseValue.id, after: { title: input.title, archetype: input.archetype }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return caseValue;
     });
-    return json(created, 201);
+    return json({ ...created, warnings: metadata.warnings }, 201);
   }
   const caseMatch = path.match(/^cases\/([^/]+)(?:\/(submit|assign|approve|authorization|versions|resolve))?$/);
   if (caseMatch) {
@@ -336,8 +336,8 @@ export async function handleCore(request: Request, segments: string[], method: s
         sourceType: input.sourceType ?? current.sourceType,
         sourceNote: input.sourceNote ?? current.sourceNote,
       };
-      const metadataIssues = caseMetadataIssues(merged);
-      if (metadataIssues.length) throw new ApiError(422, "VALIDATION_ERROR", metadataIssues.join("；"));
+      const metadata = caseMetadataReview(merged);
+      if (metadata.errors.length) throw new ApiError(422, "VALIDATION_ERROR", metadata.errors.join("；"));
       const screenshotFile = screenshot ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + "-375.png", mimeType: screenshot.mimeType, purpose: "CASE_SCREENSHOT", bytes: screenshot.bytes }) : null;
       const htmlFile = input.html ? await saveFile({ workspaceId: ctx.workspaceId, createdBy: ctx.userId, filename: caseValue.caseNo + "-v" + versionNo + ".html", mimeType: "text/html", purpose: "CASE_HTML", bytes: Buffer.from(input.html) }) : null;
       const result = await prisma.$transaction(async (tx) => {
@@ -351,7 +351,7 @@ export async function handleCore(request: Request, segments: string[], method: s
         await appendAudit(tx, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "CASE_VERSION_CREATED", resourceType: "CASE", resourceId: caseValue.id, before: { currentVersion: caseValue.currentVersion }, after: { currentVersion: versionNo }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
         return { ...updated, version };
       });
-      return json(result, 201);
+      return json({ ...result, warnings: metadata.warnings }, 201);
     }
     if (method === "POST" && caseMatch[2] === "submit") {
       assertCapability(can.editCases(ctx.roles));

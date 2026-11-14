@@ -9,7 +9,7 @@ import {
   INTENT_TAGS,
   START_POINTS,
   VISUAL_GRAMMAR_FIELDS,
-  caseMetadataIssues,
+  caseMetadataReview,
 } from "@/lib/case-metadata";
 
 const EMPTY_HTML = `<!doctype html>
@@ -64,6 +64,7 @@ export default function NewCasePage() {
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [previewTab, setPreviewTab] = useState<"screenshot" | "html">("screenshot");
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   function set(key: string, value: any) {
@@ -102,6 +103,7 @@ export default function NewCasePage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setWarnings([]);
     if (!screenshot) {
       setError("请上传 375px 截图");
       return;
@@ -110,11 +112,12 @@ export default function NewCasePage() {
       setError("请选择至少一个用户侧起稿起点");
       return;
     }
-    const metadataIssues = caseMetadataIssues(form);
-    if (metadataIssues.length) {
-      setError(metadataIssues.join("；"));
+    const metadata = caseMetadataReview(form);
+    if (metadata.errors.length) {
+      setError(metadata.errors.join("；"));
       return;
     }
+    setWarnings(metadata.warnings);
 
     setLoading(true);
     try {
@@ -129,6 +132,10 @@ export default function NewCasePage() {
         ),
       };
       const created: any = await api("/cases", { method: "POST", body: JSON.stringify(payload) });
+      const responseWarnings = Array.isArray(created.warnings) ? created.warnings : metadata.warnings;
+      if (responseWarnings.length) {
+        window.sessionStorage.setItem("wecraft-case-warnings", JSON.stringify(responseWarnings));
+      }
       router.push("/cases/" + created.id);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存失败");
@@ -207,7 +214,8 @@ export default function NewCasePage() {
           <div className="form-section-head"><div><h3>六维自评</h3><p>1–5 分；无图时图片叙事可选 N/A</p></div><span className="form-section-index">04</span></div>
           <div className="score-grid">{DIMENSIONS.map((dimension) => <div className="score-field" key={dimension.code}><span>{dimension.label}{dimension.code === "IMAGE_NARRATIVE" ? <span className="hint">（无图可选 N/A）</span> : null}</span><select className="select" value={form.selfScores[dimension.code]} onChange={(event) => set("selfScores", { ...form.selfScores, [dimension.code]: event.target.value })}><option value="N/A">N/A</option>{[1, 2, 3, 4, 5].map((value) => <option key={value} value={value}>{value}</option>)}</select></div>)}</div>
         </section>
-        <div className="notice">授权字段默认全部为 false。案例创建后由 Owner / Design Lead 在详情页填写并保存授权证据；缺少七项视觉语法或正文承接机制的数据集将被阻断导出。</div>
+        <div className="notice">授权字段默认全部为 false。案例创建后由 Owner / Design Lead 在详情页填写并保存授权证据；字段缺失、未知字段、授权或双评不完整会阻断导出，图像语言和结构签名较弱只显示改进建议。</div>
+        {warnings.length ? <div className="notice">可保存的质量建议：{warnings.join("；")}</div> : null}
         {error ? <div className="error-box">{error}</div> : null}
         <div className="form-actions"><div className="small muted">保存后不会覆盖历史版本；修改会生成新版本并重新进入评审。</div><button className="btn primary cta" type="submit" disabled={loading}><span className="cta-plus">＋</span>{loading ? "保存中…" : "保存案例卡并进入详情"}</button></div>
       </div>

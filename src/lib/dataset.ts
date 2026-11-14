@@ -5,9 +5,10 @@ import { hashObject, sha256 } from "./hash";
 import { readStoredFile, saveFile } from "./storage";
 import { ApiError } from "./api";
 import { aggregateReviewEvidence } from "./review-aggregation";
-import { structureSignatureIssues, visualGrammarIssues } from "./case-metadata";
+import { structureSignatureReview, visualGrammarReview } from "./case-metadata";
 
 type Blocker = { itemId: string; code: string; message: string };
+type ValidationWarning = { itemId: string; code: string; message: string };
 type ValidationOptions = { persist?: boolean; enforceSnapshot?: boolean };
 
 function json(value: unknown) {
@@ -68,6 +69,7 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
   const enforceSnapshot = options.enforceSnapshot ?? false;
   const items = await prisma.datasetItem.findMany({ where: { datasetId: dataset.id }, orderBy: { sortOrder: "asc" } });
   const blockers: Blocker[] = [];
+  const warnings: ValidationWarning[] = [];
   const rights: Record<string, unknown> = {};
   const eligibility: Array<Record<string, unknown>> = [];
   const normalizedItems: Array<{ item: DatasetItem; snapshot: Record<string, unknown>; rights: Record<string, unknown>; status: "READY" | "QUARANTINED" }> = [];
@@ -78,6 +80,7 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
 
   for (const item of items) {
     const itemBlockers: Blocker[] = [];
+    const itemWarnings: ValidationWarning[] = [];
     let snapshot: Record<string, unknown> = (item.snapshot ?? {}) as Record<string, unknown>;
     let itemRights: Record<string, unknown> = {};
     try {
@@ -106,10 +109,12 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
         const startPoints = Array.isArray(version?.startPoints) ? version.startPoints : [];
         if (!startPoints.length) itemBlockers.push({ itemId: item.id, code: "START_POINT_MISSING", message: value.caseNo + " 缺少用户侧起稿起点" });
         if (!version?.bodyMechanism?.trim()) itemBlockers.push({ itemId: item.id, code: "BODY_MECHANISM_MISSING", message: value.caseNo + " 缺少正文承接机制" });
-        const structureIssues = structureSignatureIssues(version?.structureSignature);
-        if (structureIssues.length) itemBlockers.push({ itemId: item.id, code: "STRUCTURE_SIGNATURE_MISSING", message: value.caseNo + " 的结构签名不可比较：" + structureIssues.join("；") });
-        const visualIssues = visualGrammarIssues(version?.visualGrammar);
-        if (visualIssues.length) itemBlockers.push({ itemId: item.id, code: "VISUAL_GRAMMAR_MISSING", message: value.caseNo + " 的视觉语法不完整：" + visualIssues.join("；") });
+        const structureReview = structureSignatureReview(version?.structureSignature);
+        if (structureReview.errors.length) itemBlockers.push({ itemId: item.id, code: "STRUCTURE_SIGNATURE_INVALID", message: value.caseNo + " 的结构签名格式无效：" + structureReview.errors.join("；") });
+        if (structureReview.warnings.length) itemWarnings.push({ itemId: item.id, code: "STRUCTURE_SIGNATURE_WEAK", message: value.caseNo + " 的结构签名可继续补充：" + structureReview.warnings.join("；") });
+        const visualReview = visualGrammarReview(version?.visualGrammar);
+        if (visualReview.errors.length) itemBlockers.push({ itemId: item.id, code: "VISUAL_GRAMMAR_INVALID", message: value.caseNo + " 的视觉语法不完整：" + visualReview.errors.join("；") });
+        if (visualReview.warnings.length) itemWarnings.push({ itemId: item.id, code: "VISUAL_GRAMMAR_WEAK", message: value.caseNo + " 的图像语言可继续具体化：" + visualReview.warnings.join("；") });
         if (enforceSnapshot && version && item.snapshot && typeof item.snapshot === "object") {
           const frozen = item.snapshot as Record<string, unknown>;
           if (frozen.caseVersionId !== version.id) itemBlockers.push({ itemId: item.id, code: "VERSION_DRIFT", message: value.caseNo + " 在批准后产生了新版本，请重新校验并批准" });
@@ -197,8 +202,9 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
       itemBlockers.push({ itemId: item.id, code: "VALIDATION_ERROR", message: error instanceof Error ? error.message : "校验失败" });
     }
     blockers.push(...itemBlockers);
+    warnings.push(...itemWarnings);
     rights[item.id] = itemRights;
-    eligibility.push({ itemId: item.id, snapshot, ok: itemBlockers.length === 0 });
+    eligibility.push({ itemId: item.id, snapshot, ok: itemBlockers.length === 0, warnings: itemWarnings });
     normalizedItems.push({ item, snapshot, rights: itemRights, status: itemBlockers.length === 0 ? "READY" : "QUARANTINED" });
   }
 
@@ -214,12 +220,12 @@ export async function validateDataset(dataset: Dataset, options: ValidationOptio
   }
 
   const status = blockers.length ? "BLOCKED" : "READY_FOR_APPROVAL";
-  const snapshot = { checkedAt: new Date().toISOString(), blockers, eligibility };
+  const snapshot = { checkedAt: new Date().toISOString(), blockers, warnings, eligibility };
   const updated = persist ? await prisma.dataset.update({
     where: { id: dataset.id },
     data: { status, rightsSnapshot: json(rights), eligibilitySnapshot: json(snapshot), itemCount: items.length, manifestHash: computedManifestHash },
   }) : dataset;
-  return { dataset: updated, blockers, manifestHash: computedManifestHash };
+  return { dataset: updated, blockers, warnings, manifestHash: computedManifestHash };
 }
 
 export async function createExport(datasetId: string, actorId: string) {

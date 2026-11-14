@@ -110,9 +110,10 @@
 
 ## 9. 2026-11-14 生产化补充记录
 
-- 公网 revisions 已通过健康接口与 `/var/lib/wecraft-training/last-release` 对齐；`20261114T1600-2f61ce3` 发布返回 `RELEASE_OK`，应用和 PostgreSQL 容器健康。
+- 公网 revisions 已通过健康接口与 `/var/lib/wecraft-training/last-release` 对齐；`20261114T1600-2f61ce3` 和最终 `20261114T1620-6922dd1` 均返回 `RELEASE_OK`，应用和 PostgreSQL 容器健康。
 - 正式试点 Workspace `wecraft-pilot` 已创建，8 个演示账号已停用，`DEMO_SEED_IF_EMPTY=0`；演示 Workspace 仅隔离保留。
 - 本机备份已加入 SHA-256 校验、`pg_restore` 可读性检查和 30 天保留；`preflight.sh` 会把缺失检查、连接失败和数据缺口按 fail-closed 处理。
+- 2026-11-14 16:19 已在隔离库完成恢复演练，恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计；运行时 `preflight` 为 0 阻断，试点门禁仍有 11 项业务/外部配置阻断。
 - 训练平台与 WeCraft 生产仍共用 ECS/Docker daemon，15:48 前后发生训练容器被外部停止/清理的事故；共享锁和固定镜像降低了风险，但正式生产仍要求独立运行边界或书面风险接受。
 - 真实数据、独立评审账号、告警送达、异地备份和 Holdout 结果尚未完成，因此当前状态是“受控试点”，不是“正式生产”。
 

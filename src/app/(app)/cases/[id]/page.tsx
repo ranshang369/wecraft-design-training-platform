@@ -9,7 +9,7 @@ import {
   INTENT_TAGS,
   START_POINTS,
   VISUAL_GRAMMAR_FIELDS,
-  caseMetadataIssues,
+  caseMetadataReview,
   startPointLabels,
 } from "@/lib/case-metadata";
 
@@ -44,6 +44,20 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   const [busy, setBusy] = useState(false);
   const [resolveOutcome, setResolveOutcome] = useState("ELIGIBLE");
   const [resolveReason, setResolveReason] = useState("");
+
+  useEffect(() => {
+    const saved = window.sessionStorage.getItem("wecraft-case-warnings");
+    if (!saved) return;
+    window.sessionStorage.removeItem("wecraft-case-warnings");
+    try {
+      const warnings = JSON.parse(saved);
+      if (Array.isArray(warnings) && warnings.length) {
+        setMessage({ ok: true, text: "案例已保存。质量建议：" + warnings.join("；") });
+      }
+    } catch {
+      // Ignore malformed one-time UI hints; the API remains the source of truth.
+    }
+  }, []);
 
   const roles: string[] = meQuery.data?.roles ?? [];
   const canEdit = roles.some((role) => ["OWNER", "DESIGN_LEAD", "ANNOTATOR"].includes(role));
@@ -113,7 +127,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   }
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true); setMessage(null);
-    try { await action(); await reload(success); }
+    try {
+      const result: any = await action();
+      const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+      await reload(success);
+      if (warnings.length) {
+        setMessage({ ok: true, text: success + " 质量建议：" + warnings.join("；") });
+      }
+    }
     catch (error) { setMessage({ ok: false, text: error instanceof Error ? error.message : "操作失败" }); }
     finally { setBusy(false); }
   }
@@ -123,9 +144,9 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
       setMessage({ ok: false, text: "请选择至少一个用户侧起稿起点。" });
       return;
     }
-    const metadataIssues = caseMetadataIssues(form);
-    if (metadataIssues.length) {
-      setMessage({ ok: false, text: metadataIssues.join("；") });
+    const metadata = caseMetadataReview(form);
+    if (metadata.errors.length) {
+      setMessage({ ok: false, text: metadata.errors.join("；") });
       return;
     }
     const payload: any = {

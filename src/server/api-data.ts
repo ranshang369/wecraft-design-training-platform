@@ -195,7 +195,7 @@ export async function handleData(request: Request, segments: string[], method: s
       assertCapability(can.createDataset(ctx.roles));
       if (["APPROVED", "READY"].includes(dataset.status)) throw new ApiError(409, "INVALID_STATE", "已批准的数据集已冻结，不能重新校验；请创建新版本");
       const result = await validateDataset(dataset);
-      await appendAudit(prisma, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "DATASET_VALIDATED", resourceType: "DATASET", resourceId: dataset.id, after: { status: result.dataset.status, blockers: result.blockers.length }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
+      await appendAudit(prisma, { workspaceId: ctx.workspaceId, actorId: ctx.userId, action: "DATASET_VALIDATED", resourceType: "DATASET", resourceId: dataset.id, after: { status: result.dataset.status, blockers: result.blockers.length, warnings: result.warnings.length }, requestId: meta.requestId, ip: meta.ip, userAgent: meta.userAgent });
       return json(result);
     }
     if (method === "POST" && datasetMatch[2] === "approve") {

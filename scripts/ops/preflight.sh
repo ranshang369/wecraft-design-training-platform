@@ -132,16 +132,16 @@ if [[ "$MODE" == "pilot" ]]; then
     [[ "$holdout_pairs" -ge 30 ]] && pass "holdout_pairs" "$holdout_pairs / 30 (3 reviewers)" || block "holdout_pairs" "$holdout_pairs / 30 (3 reviewers)"
   fi
 
-  roles_sql="with pilot as (select id from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE'), active_users as (select distinct u.id, r.code from \"User\" u join \"Membership\" m on m.\"userId\"=u.id and m.\"workspaceId\"=(select id from pilot) and m.status='ACTIVE' join \"MemberRole\" mr on mr.\"membershipId\"=m.id join \"Role\" r on r.id=mr.\"roleId\" where u.\"isActive\"=true and u.email not like '%@example.test') select (select count(distinct id) from active_users where code='DESIGN_LEAD'), (select count(distinct id) from active_users where code='ANNOTATOR'), (select count(distinct id) from active_users where code='AI_ENGINEER'), (select count(distinct id) from active_users where code='CONTENT_LEAD');"
+  roles_sql="with pilot as (select id from \"Workspace\" where slug='$PILOT_WORKSPACE_SLUG' and status='ACTIVE'), non_owner_users as (select distinct u.id, r.code from \"User\" u join \"Membership\" m on m.\"userId\"=u.id and m.\"workspaceId\"=(select id from pilot) and m.status='ACTIVE' join \"MemberRole\" mr on mr.\"membershipId\"=m.id join \"Role\" r on r.id=mr.\"roleId\" where u.\"isActive\"=true and u.email not like '%@example.test' and not exists (select 1 from \"MemberRole\" owner_mr join \"Role\" owner_r on owner_r.id=owner_mr.\"roleId\" where owner_mr.\"membershipId\"=m.id and owner_r.code='OWNER')) select (select count(distinct id) from non_owner_users where code='DESIGN_LEAD'), (select count(distinct id) from non_owner_users where code='ANNOTATOR'), (select count(distinct id) from non_owner_users where code='AI_ENGINEER'), (select count(distinct id) from non_owner_users where code='CONTENT_LEAD');"
   role_counts="$(docker exec "$DB_CONTAINER" psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F '|' -c "$roles_sql" 2>/dev/null || true)"
   if [[ -z "$role_counts" ]]; then
     block "role_coverage" "无法读取 Pilot 角色覆盖"
   else
     IFS='|' read -r design_leads annotators ai_engineers content_leads <<<"$role_counts"
     if [[ "$design_leads" -ge 1 && "$annotators" -ge 2 && "$ai_engineers" -ge 1 && "$content_leads" -ge 1 ]]; then
-      pass "role_coverage" "design_lead=$design_leads annotators=$annotators ai_engineer=$ai_engineers content_lead=$content_leads"
+      pass "role_coverage" "non-owner design_lead=$design_leads annotators=$annotators ai_engineer=$ai_engineers content_lead=$content_leads"
     else
-      block "role_coverage" "design_lead=$design_leads/1 annotators=$annotators/2 ai_engineer=$ai_engineers/1 content_lead=$content_leads/1"
+      block "role_coverage" "non-owner design_lead=$design_leads/1 annotators=$annotators/2 ai_engineer=$ai_engineers/1 content_lead=$content_leads/1"
     fi
   fi
 fi

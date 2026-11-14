@@ -33,15 +33,15 @@
 
 ## 3. 账号与职责分离
 
-开始数据生产前，OWNER 必须在 `/settings/members` 建立以下真实账号，并完成一次权限冒烟：
+开始数据生产前，OWNER 必须在 `/settings/members` 建立以下真实账号，并完成一次权限冒烟。除 OWNER 外，其他角色均不得由 OWNER 账号兼任：
 
 | 角色 | 最低人数 | 不能兼任的操作 |
 | --- | --- | --- |
 | OWNER | 1 | 不能替代两名独立评审；不能独自完成授权、数据和业务三类签收 |
-| DESIGN_LEAD | 1 | 不能给自己的案例提交“独立双评” |
-| ANNOTATOR | 2 | 两名评审不能共用账号；不能审自己制作的候选 |
-| AI_ENGINEER | 1 | 不能同时担任同组 Holdout 裁决人 |
-| CONTENT_LEAD | 1 | 不能把未审批 Brief 计入黄金 Brief 门禁 |
+| DESIGN_LEAD | 1（非 OWNER） | 不能给自己的案例提交“独立双评” |
+| ANNOTATOR | 2（非 OWNER） | 两名评审不能共用账号；不能审自己制作的候选 |
+| AI_ENGINEER | 1（非 OWNER） | 不能同时担任同组 Holdout 裁决人 |
+| CONTENT_LEAD | 1（非 OWNER） | 不能把未审批 Brief 计入黄金 Brief 门禁 |
 
 账号开通用一次性邀请链接，密码通过独立受控渠道发送；不得把密码写入飞书群公告、Git 或本文档。演示账号继续停用。
 

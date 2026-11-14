@@ -31,7 +31,7 @@
 - 2026-11-14 17:36 备份脚本已成功写入异地副本，`/var/lib/wecraft-training/last-offsite-copy` 为 `result=ok`；17:41 从 OSS 重新下载最新 dump，SHA-256 与远端清单一致，并在隔离库恢复出 2 个 Workspace、5 个案例、2 个候选和 53 条审计，临时库已删除。
 - 单元测试、类型检查和生产构建通过；核心 E2E 曾通过 13/13，覆盖双评、Holdout、硬检查、导出、权限与审计。
 - 正式试点 Workspace 已创建，演示账号已停用，审计中有初始化记录。
-- `preflight.sh --pilot` 当前为 8 个阻断：角色覆盖、案例、反例、黄金 Brief、主型、授权、双评和 Holdout；运行时检查和运维闭环为 0 阻断。角色覆盖要求独立的 DESIGN_LEAD、2 名 ANNOTATOR、AI_ENGINEER 和 CONTENT_LEAD；当前只有 1 个真实账号，且 ANNOTATOR 为 1/2。
+- `preflight.sh --pilot` 当前为 8 个阻断：非 OWNER 角色覆盖、案例、反例、黄金 Brief、主型、授权、双评和 Holdout；运行时检查和运维闭环为 0 阻断。角色覆盖要求独立的非 OWNER DESIGN_LEAD、2 名非 OWNER ANNOTATOR、非 OWNER AI_ENGINEER 和非 OWNER CONTENT_LEAD；当前只有 1 个 OWNER，不能把“一人全角色”计作职责分离。
 
 ## 3. 正式投用前仍为阻断项
 
@@ -40,7 +40,7 @@
 | 飞书告警送达 | 平台运维 | 自定义机器人 webhook 写入 `600` 权限文件，`test-alert.sh` 返回 `ALERT_TEST_OK` | 已完成（2026-11-14 16:33） |
 | 异地备份 | 平台运维 + 数据负责人 | 独立 OSS Bucket 与专用 rclone remote，`backup-postgres.sh` 输出 `offsite_copy=ok` | 已完成（2026-11-14 17:36） |
 | 恢复演练证据 | 平台运维 | 执行 `restore-drill-offsite.sh`，生成 7 天内有效的 `last-restore-drill` | 已完成（2026-11-14 17:41，异地下载） |
-| 独立团队账号 | OWNER | 至少建立独立的 DESIGN_LEAD、ANNOTATOR（2 人以上）、AI_ENGINEER 和 CONTENT_LEAD 账号 | 1 个真实账号；design_lead=1/1、annotators=1/2、ai_engineer=1/1、content_lead=1/1 |
+| 独立团队账号 | OWNER | 至少建立非 OWNER 的 DESIGN_LEAD、ANNOTATOR（2 人）、AI_ENGINEER 和 CONTENT_LEAD 账号 | 1 个真实 OWNER；非 OWNER 角色尚未建立 |
 | 真实优质案例 | DESIGN_LEAD | 30 个 `ELIGIBLE` 案例，9 个主型各至少 3 个 | 0 / 30 |
 | 已批准反例 | DESIGN_LEAD | 10 个 `APPROVED` 反例 | 0 / 10 |
 | 黄金 Brief | CONTENT_LEAD | 60 个非 `CASE_SOURCE` Brief | 0 / 60 |
